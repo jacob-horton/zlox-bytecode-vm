@@ -1,3 +1,5 @@
 const std = @import("std");
 
-pub fn main() anyerror!void {}
+pub fn main() !void {}
+
+
