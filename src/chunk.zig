@@ -3,8 +3,13 @@ const Value = @import("value.zig").Value;
 const ValueArray = @import("value.zig").ValueArray;
 
 pub const OpCode = enum(u8) {
-    OP_CONSTANT,
-    OP_RETURN,
+    CONSTANT,
+    ADD,
+    SUBTRACT,
+    MULTIPLY,
+    DIVIDE,
+    NEGATE,
+    RETURN,
 };
 
 const RleItem = struct {
@@ -13,13 +18,13 @@ const RleItem = struct {
 };
 
 pub const Chunk = struct {
-    data: std.ArrayList(u8),
+    code: std.ArrayList(u8),
     lines: std.ArrayList(RleItem),
     constants: ValueArray,
 
     pub fn init(allocator: std.mem.Allocator) Chunk {
         return Chunk{
-            .data = std.ArrayList(u8).init(allocator),
+            .code = std.ArrayList(u8).init(allocator),
             .lines = std.ArrayList(RleItem).init(allocator),
             .constants = ValueArray.init(allocator),
         };
@@ -63,7 +68,7 @@ pub const Chunk = struct {
     pub fn write(self: *Chunk, data: u8, line: usize) !void {
         try self.addLine(line);
 
-        return self.data.append(data);
+        return self.code.append(data);
     }
 
     pub fn addConstant(self: *Chunk, value: Value) !u8 {
@@ -73,7 +78,7 @@ pub const Chunk = struct {
     }
 
     pub fn deinit(self: Chunk) void {
-        self.data.deinit();
+        self.code.deinit();
         self.lines.deinit();
         self.constants.deinit();
     }

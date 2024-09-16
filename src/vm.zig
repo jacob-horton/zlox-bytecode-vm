@@ -1,0 +1,128 @@
+const std = @import("std");
+const Chunk = @import("chunk.zig").Chunk;
+const OpCode = @import("chunk.zig").OpCode;
+const printValue = @import("value.zig").printValue;
+const Value = @import("value.zig").Value;
+const common = @import("common.zig");
+const dissassembleInstruction = @import("debug.zig").dissassembleInstruction;
+
+const STACK_MAX = 256;
+
+pub const InterpretResult = enum {
+    OK,
+    COMPILE_ERROR,
+    RUNTIME_ERROR,
+};
+
+fn add(a: Value, b: Value) Value {
+    return a + b;
+}
+
+fn subtract(a: Value, b: Value) Value {
+    return a - b;
+}
+
+fn multiply(a: Value, b: Value) Value {
+    return a * b;
+}
+
+fn divide(a: Value, b: Value) Value {
+    return a / b;
+}
+
+pub const VM = struct {
+    chunk: ?*Chunk,
+    ip: usize,
+    stack: [STACK_MAX]Value,
+    stackTop: usize,
+
+    pub fn init() VM {
+        return VM{
+            .chunk = null,
+            .ip = 0,
+            .stack = undefined,
+            .stackTop = 0,
+        };
+    }
+
+    pub fn interpret(self: *VM, chunk: *Chunk) InterpretResult {
+        self.chunk = chunk;
+
+        // TODO: make this a pointer instead of an offset
+        self.ip = 0;
+        return self.run();
+    }
+
+    pub fn push(self: *VM, value: Value) void {
+        self.stack[self.stackTop] = value;
+        self.stackTop += 1;
+    }
+
+    pub fn pop(self: *VM) Value {
+        self.stackTop -= 1;
+        return self.stack[self.stackTop];
+    }
+
+    pub fn peek(self: *VM) *Value {
+        return &self.stack[self.stackTop - 1];
+    }
+
+    pub fn resetStack(self: *VM) void {
+        self.stackTop = 0;
+    }
+
+    fn readByte(self: *VM) u8 {
+        const byte = self.chunk.?.code.items[self.ip];
+        self.ip += 1;
+        return byte;
+    }
+
+    fn readConstant(self: *VM) f64 {
+        return self.chunk.?.constants.items[self.readByte()];
+    }
+
+    fn binaryOp(self: *VM, op: fn (a: Value, b: Value) Value) void {
+        const b = self.pop();
+        const a = self.pop();
+        self.push(op(a, b));
+    }
+
+    pub fn run(self: *VM) InterpretResult {
+        while (true) {
+            if (common.DEBUG_TRACE_EXECUTION) {
+                std.debug.print("          ", .{});
+                for (0..self.stackTop) |slot| {
+                    std.debug.print("[ ", .{});
+                    printValue(self.stack[slot]);
+                    std.debug.print(" ]", .{});
+                }
+
+                std.debug.print("\n", .{});
+
+                _ = dissassembleInstruction(self.chunk.?, self.ip);
+            }
+
+            const instruction = self.readByte();
+            switch (instruction) {
+                @intFromEnum(OpCode.CONSTANT) => {
+                    const constant = self.readConstant();
+                    self.push(constant);
+                },
+                @intFromEnum(OpCode.ADD) => self.binaryOp(add),
+                @intFromEnum(OpCode.SUBTRACT) => self.binaryOp(subtract),
+                @intFromEnum(OpCode.MULTIPLY) => self.binaryOp(multiply),
+                @intFromEnum(OpCode.DIVIDE) => self.binaryOp(divide),
+                @intFromEnum(OpCode.NEGATE) => self.peek().* = -self.peek().*,
+                @intFromEnum(OpCode.RETURN) => {
+                    printValue(self.pop());
+                    std.debug.print("\n", .{});
+                    return InterpretResult.OK;
+                },
+                else => {
+                    std.debug.print("Unknown opcode {}\n", .{instruction});
+                    return InterpretResult.COMPILE_ERROR;
+                },
+            }
+        }
+    }
+};
