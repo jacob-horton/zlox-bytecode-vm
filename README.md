@@ -1,0 +1,2 @@
+This is a port of the bytecode VM clox from the [Crafting Interpreters](https://github.com/munificent/craftinginterpreters) book. I've re-written this in Zig as an exercise to learn both Zig and bytecode VMs. The general structure remains the same as clox, but of course has some changes to suit Zig better. I've also implemented some of the features discussed in the "Challenge" sections at the end of each Chapter.
+
