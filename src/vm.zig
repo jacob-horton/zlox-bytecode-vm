@@ -5,6 +5,7 @@ const printValue = @import("value.zig").printValue;
 const Value = @import("value.zig").Value;
 const common = @import("common.zig");
 const dissassembleInstruction = @import("debug.zig").dissassembleInstruction;
+const compiler = @import("kompiler.zig");
 
 const STACK_MAX = 256;
 
@@ -32,6 +33,7 @@ fn divide(a: Value, b: Value) Value {
 
 pub const VM = struct {
     chunk: ?*Chunk,
+    // TODO: make this a pointer instead of an offset
     ip: usize,
     stack: [STACK_MAX]Value,
     stackTop: usize,
@@ -45,12 +47,9 @@ pub const VM = struct {
         };
     }
 
-    pub fn interpret(self: *VM, chunk: *Chunk) InterpretResult {
-        self.chunk = chunk;
-
-        // TODO: make this a pointer instead of an offset
-        self.ip = 0;
-        return self.run();
+    pub fn interpret(source: []u8) InterpretResult {
+        compiler.compile(source);
+        return InterpretResult.OK;
     }
 
     pub fn push(self: *VM, value: Value) void {
@@ -71,13 +70,13 @@ pub const VM = struct {
         self.stackTop = 0;
     }
 
-    fn readByte(self: *VM) u8 {
+    inline fn readByte(self: *VM) u8 {
         const byte = self.chunk.?.code.items[self.ip];
         self.ip += 1;
         return byte;
     }
 
-    fn readConstant(self: *VM) f64 {
+    inline fn readConstant(self: *VM) f64 {
         return self.chunk.?.constants.items[self.readByte()];
     }
 

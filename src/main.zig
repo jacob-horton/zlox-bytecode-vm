@@ -3,35 +3,59 @@ const Chunk = @import("chunk.zig").Chunk;
 const OpCode = @import("chunk.zig").OpCode;
 const debug = @import("debug.zig");
 const VM = @import("vm.zig").VM;
+const InterpretResult = @import("vm.zig").InterpretResult;
+
+fn repl() !void {
+    var input: [1024]u8 = undefined;
+    const stdin = std.io.getStdIn().reader();
+
+    while (true) {
+        std.debug.print("> ", .{});
+
+        const line = (stdin.readUntilDelimiter(&input, '\n')) catch {
+            std.debug.print("\n", .{});
+            return;
+        };
+
+        _ = VM.interpret(line);
+    }
+}
+
+fn readFile(allocator: std.mem.Allocator, path: []const u8) ![]u8 {
+    const mb = (1 << 10) << 10;
+    return std.fs.cwd().readFileAlloc(allocator, path, mb);
+}
+
+fn runFile(allocator: std.mem.Allocator, path: []const u8) !void {
+    const contents = try readFile(allocator, path);
+    defer allocator.free(contents);
+
+    switch (VM.interpret(contents)) {
+        InterpretResult.OK => {},
+        InterpretResult.COMPILE_ERROR => std.process.exit(65),
+        InterpretResult.RUNTIME_ERROR => std.process.exit(70),
+    }
+}
 
 pub fn main() !void {
+    var args = std.process.args();
+    _ = args.next();
+
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     const allocator = gpa.allocator();
     defer _ = gpa.deinit();
+    // var vm = VM.init();
 
-    var chunk = Chunk.init(allocator);
-    defer chunk.deinit();
+    if (args.next()) |file_name| {
+        if (args.next() != null) {
+            std.debug.print("Usage: clox [path]\n", .{});
+            return std.process.exit(64);
+        }
 
-    const const1 = try chunk.addConstant(1.2);
-    try chunk.write(@intFromEnum(OpCode.CONSTANT), 123);
-    try chunk.write(const1, 123);
+        try runFile(allocator, file_name);
+    } else {
+        try repl();
+    }
 
-    const const2 = try chunk.addConstant(3.4);
-    try chunk.write(@intFromEnum(OpCode.CONSTANT), 123);
-    try chunk.write(const2, 123);
-
-    try chunk.write(@intFromEnum(OpCode.ADD), 123);
-
-    const const3 = try chunk.addConstant(5.6);
-    try chunk.write(@intFromEnum(OpCode.CONSTANT), 123);
-    try chunk.write(const3, 123);
-
-    try chunk.write(@intFromEnum(OpCode.DIVIDE), 123);
-    try chunk.write(@intFromEnum(OpCode.NEGATE), 123);
-
-    try chunk.write(@intFromEnum(OpCode.RETURN), 123);
-
-    var vm = VM.init();
-    _ = vm.interpret(&chunk);
     // debug.dissassembleChunk(&chunk, "test chunk");
 }
