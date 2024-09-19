@@ -11,11 +11,11 @@ pub fn dissassembleChunk(chunk: *Chunk, name: []const u8) void {
 
     var offset: usize = 0;
     while (offset < chunk.code.items.len) {
-        offset = dissassembleInstruction(chunk, offset);
+        offset = disassembleInstruction(chunk, offset);
     }
 }
 
-pub fn dissassembleInstruction(chunk: *Chunk, offset: usize) usize {
+pub fn disassembleInstruction(chunk: *Chunk, offset: usize) usize {
     std.debug.print("{d:4} ", .{offset});
     if (offset > 0 and (chunk.getLine(offset) == chunk.getLine(offset - 1))) {
         std.debug.print("   | ", .{});

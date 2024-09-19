@@ -16,8 +16,8 @@ const OpCode = zlox_chunk.OpCode;
 const Value = zlox_value.Value;
 
 const Parser = struct {
-    current: ?Token,
-    previous: ?Token,
+    current: Token,
+    previous: Token,
     had_error: bool,
     panic_mode: bool,
 };
@@ -48,7 +48,7 @@ const rules = blk: {
     const num_token_types = @typeInfo(TokenType).Enum.fields.len;
 
     // Rules for each token type. Default is { .infix = null, .prefix = null, .precedence = Precedence.NONE }
-    var _rules: [num_token_types]ParseRule = undefined;
+    var _rules = [_]ParseRule{ParseRule{}} ** num_token_types;
 
     _rules[@intFromEnum(TokenType.LEFT_PAREN)] = ParseRule{ .prefix = Compiler.grouping };
     _rules[@intFromEnum(TokenType.LEFT_PAREN)] = ParseRule{ .prefix = Compiler.grouping };
@@ -67,19 +67,21 @@ fn getRule(typ: TokenType) *const ParseRule {
 
 pub const Compiler = struct {
     parser: Parser,
-    scanner: ?Scanner,
-    compiling_chunk: ?*Chunk,
+    scanner: Scanner,
+    compiling_chunk: *Chunk,
 
     pub fn init() Compiler {
         return Compiler{
             .parser = Parser{
                 .had_error = false,
                 .panic_mode = false,
-                .previous = null,
-                .current = null,
+                // These will get set up when we `advance()` which is kicked off in `compile()` before doing anything
+                .previous = undefined,
+                .current = undefined,
             },
-            .scanner = null,
-            .compiling_chunk = null,
+            // These will get set up when we `compile()` i.e. before doing anything
+            .scanner = undefined,
+            .compiling_chunk = undefined,
         };
     }
 
@@ -109,13 +111,13 @@ pub const Compiler = struct {
     }
 
     fn number(self: *Compiler) !void {
-        const token = self.parser.previous.?;
+        const token = self.parser.previous;
         const value = try std.fmt.parseFloat(f64, token.start[0..token.length]);
         try self.emitConstant(value);
     }
 
     fn unary(self: *Compiler) !void {
-        const op_type = self.parser.previous.?.type;
+        const op_type = self.parser.previous.type;
 
         // Compile the operand
         try self.parsePrecedence(Precedence.UNARY);
@@ -128,7 +130,7 @@ pub const Compiler = struct {
     }
 
     fn binary(self: *Compiler) !void {
-        const op_type = self.parser.previous.?.type;
+        const op_type = self.parser.previous.type;
         const rule = getRule(op_type);
         try self.parsePrecedence(@enumFromInt(@intFromEnum(rule.precedence) + 1));
 
@@ -143,7 +145,7 @@ pub const Compiler = struct {
 
     fn parsePrecedence(self: *Compiler, precedence: Precedence) !void {
         self.advance();
-        const rule = getRule(self.parser.previous.?.type);
+        const rule = getRule(self.parser.previous.type);
         if (rule.*.prefix) |prefix_rule| {
             try prefix_rule(self);
         } else {
@@ -151,10 +153,10 @@ pub const Compiler = struct {
             return;
         }
 
-        while (@intFromEnum(precedence) <= @intFromEnum(getRule(self.parser.current.?.type).precedence)) {
+        while (@intFromEnum(precedence) <= @intFromEnum(getRule(self.parser.current.type).precedence)) {
             self.advance();
             // TODO: handle null infix?
-            const infix_rule = getRule(self.parser.previous.?.type).infix.?;
+            const infix_rule = getRule(self.parser.previous.type).infix.?;
             try infix_rule(self);
         }
     }
@@ -163,8 +165,8 @@ pub const Compiler = struct {
         self.parser.previous = self.parser.current;
 
         while (true) {
-            self.parser.current = self.scanner.?.scanToken();
-            const current_token = self.parser.current.?;
+            self.parser.current = self.scanner.scanToken();
+            const current_token = self.parser.current;
 
             if (current_token.type != TokenType.ERROR) break;
 
@@ -173,7 +175,7 @@ pub const Compiler = struct {
     }
 
     fn consume(self: *Compiler, typ: TokenType, message: []const u8) void {
-        if (self.parser.current.?.type == typ) {
+        if (self.parser.current.type == typ) {
             self.advance();
             return;
         }
@@ -198,7 +200,7 @@ pub const Compiler = struct {
     }
 
     fn currentChunk(self: *Compiler) *Chunk {
-        return self.compiling_chunk.?;
+        return self.compiling_chunk;
     }
 
     fn emitBytes(self: *Compiler, byte1: u8, byte2: u8) !void {
@@ -207,7 +209,7 @@ pub const Compiler = struct {
     }
 
     fn emitByte(self: *Compiler, byte: u8) !void {
-        try self.currentChunk().write(byte, self.parser.previous.?.line);
+        try self.currentChunk().write(byte, self.parser.previous.line);
     }
 
     fn makeConstant(self: *Compiler, value: Value) !u8 {
@@ -221,11 +223,11 @@ pub const Compiler = struct {
     }
 
     fn errAtCurrent(self: *Compiler, message: []const u8) void {
-        self.errAt(&self.parser.previous.?, message);
+        self.errAt(&self.parser.previous, message);
     }
 
     fn err(self: *Compiler, message: []const u8) void {
-        self.errAt(&self.parser.previous.?, message);
+        self.errAt(&self.parser.previous, message);
     }
 
     fn errAt(self: *Compiler, token: *Token, message: []const u8) void {

@@ -38,17 +38,19 @@ fn divide(a: Value, b: Value) Value {
 }
 
 pub const VM = struct {
-    chunk: ?*Chunk,
-    // TODO: make this a pointer instead of an offset
-    ip: usize,
+    chunk: *Chunk,
+    ip: [*]u8,
     stack: [STACK_MAX]Value,
     stack_top: usize,
     compiler: Compiler,
 
     pub fn init() VM {
         return VM{
-            .chunk = null,
-            .ip = 0,
+            // These will get set up when calling `interpret()` before doing anything
+            .chunk = undefined,
+            .ip = undefined,
+
+            // We define specific stack slots as we get to them, so undefined is fine
             .stack = undefined,
             .stack_top = 0,
             .compiler = Compiler.init(),
@@ -64,7 +66,7 @@ pub const VM = struct {
         }
 
         self.chunk = &chunk;
-        self.ip = 0;
+        self.ip = chunk.code.items.ptr;
 
         const result = self.run();
         return result;
@@ -89,13 +91,13 @@ pub const VM = struct {
     }
 
     inline fn readByte(self: *VM) u8 {
-        const byte = self.chunk.?.code.items[self.ip];
+        const byte = self.ip[0];
         self.ip += 1;
         return byte;
     }
 
     inline fn readConstant(self: *VM) f64 {
-        return self.chunk.?.constants.items[self.readByte()];
+        return self.chunk.constants.items[self.readByte()];
     }
 
     fn binaryOp(self: *VM, op: fn (a: Value, b: Value) Value) void {
@@ -116,7 +118,8 @@ pub const VM = struct {
 
                 std.debug.print("\n", .{});
 
-                _ = zlox_debug.dissassembleInstruction(self.chunk.?, self.ip);
+                const offset = @intFromPtr(self.ip) - @intFromPtr(self.chunk.code.items.ptr);
+                _ = zlox_debug.disassembleInstruction(self.chunk, offset);
             }
 
             const instruction = self.readByte();
