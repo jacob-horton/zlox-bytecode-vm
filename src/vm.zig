@@ -2,7 +2,7 @@ const std = @import("std");
 
 const zlox_chunk = @import("chunk.zig");
 const zlox_value = @import("value.zig");
-const zlox_compiler = @import("kompiler.zig");
+const zlox_compiler = @import("compiler.zig");
 const zlox_common = @import("common.zig");
 const zlox_debug = @import("debug.zig");
 
