@@ -114,7 +114,7 @@ pub const Scanner = struct {
         while (isDigit(self.peek())) _ = self.advance();
 
         if (self.peek() == '.' and isDigit(self.peekNext())) {
-            // Consume the ''.''
+            // Consume the '.'
             _ = self.advance();
             while (isDigit(self.peek())) _ = self.advance();
         }
@@ -184,7 +184,7 @@ pub const Scanner = struct {
     }
 
     fn isAtEnd(self: *Scanner) bool {
-        return self.current == self.end;
+        return @intFromPtr(self.current) >= @intFromPtr(self.end);
     }
 
     fn makeToken(self: *Scanner, typ: TokenType) Token {

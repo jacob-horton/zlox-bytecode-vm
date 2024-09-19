@@ -45,6 +45,7 @@ pub const Chunk = struct {
     }
 
     pub fn getLine(self: *Chunk, offset: usize) ?usize {
+        // Decode the RLE
         var counter: usize = 0;
         var currentLine: ?usize = null;
 
@@ -57,8 +58,7 @@ pub const Chunk = struct {
             currentLine = line.val;
         }
 
-        // TODO: check this isn't off by one
-        if (counter < offset) {
+        if (counter <= offset) {
             return null;
         }
 
@@ -71,9 +71,9 @@ pub const Chunk = struct {
         return self.code.append(data);
     }
 
-    pub fn addConstant(self: *Chunk, value: Value) !u8 {
+    pub fn addConstant(self: *Chunk, value: Value) !usize {
         try self.constants.append(value);
-        return @intCast(self.constants.items.len - 1);
+        return self.constants.items.len - 1;
     }
 
     pub fn deinit(self: Chunk) void {

@@ -5,7 +5,7 @@ const debug = @import("debug.zig");
 const VM = @import("vm.zig").VM;
 const InterpretResult = @import("vm.zig").InterpretResult;
 
-fn repl() !void {
+fn repl(vm: *VM, allocator: std.mem.Allocator) !void {
     var input: [1024]u8 = undefined;
     const stdin = std.io.getStdIn().reader();
 
@@ -17,7 +17,7 @@ fn repl() !void {
             return;
         };
 
-        _ = VM.interpret(line);
+        _ = try vm.interpret(allocator, line);
     }
 }
 
@@ -26,11 +26,11 @@ fn readFile(allocator: std.mem.Allocator, path: []const u8) ![]u8 {
     return std.fs.cwd().readFileAlloc(allocator, path, mb);
 }
 
-fn runFile(allocator: std.mem.Allocator, path: []const u8) !void {
+fn runFile(vm: *VM, allocator: std.mem.Allocator, path: []const u8) !void {
     const contents = try readFile(allocator, path);
     defer allocator.free(contents);
 
-    switch (VM.interpret(contents)) {
+    switch (try vm.interpret(allocator, contents)) {
         InterpretResult.OK => {},
         InterpretResult.COMPILE_ERROR => std.process.exit(65),
         InterpretResult.RUNTIME_ERROR => std.process.exit(70),
@@ -44,7 +44,8 @@ pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     const allocator = gpa.allocator();
     defer _ = gpa.deinit();
-    // var vm = VM.init();
+
+    var vm = VM.init();
 
     if (args.next()) |file_name| {
         if (args.next() != null) {
@@ -52,9 +53,9 @@ pub fn main() !void {
             return std.process.exit(64);
         }
 
-        try runFile(allocator, file_name);
+        try runFile(&vm, allocator, file_name);
     } else {
-        try repl();
+        try repl(&vm, allocator);
     }
 
     // debug.dissassembleChunk(&chunk, "test chunk");

@@ -3,6 +3,7 @@ const Chunk = @import("chunk.zig").Chunk;
 const OpCode = @import("chunk.zig").OpCode;
 const printValue = @import("value.zig").printValue;
 const Value = @import("value.zig").Value;
+const Compiler = @import("kompiler.zig").Compiler;
 const common = @import("common.zig");
 const dissassembleInstruction = @import("debug.zig").dissassembleInstruction;
 const compiler = @import("kompiler.zig");
@@ -36,38 +37,50 @@ pub const VM = struct {
     // TODO: make this a pointer instead of an offset
     ip: usize,
     stack: [STACK_MAX]Value,
-    stackTop: usize,
+    stack_top: usize,
+    compiler: Compiler,
 
     pub fn init() VM {
         return VM{
             .chunk = null,
             .ip = 0,
             .stack = undefined,
-            .stackTop = 0,
+            .stack_top = 0,
+            .compiler = Compiler.init(),
         };
     }
 
-    pub fn interpret(source: []u8) InterpretResult {
-        compiler.compile(source);
-        return InterpretResult.OK;
+    pub fn interpret(self: *VM, allocator: std.mem.Allocator, source: []u8) !InterpretResult {
+        var chunk = Chunk.init(allocator);
+        defer chunk.deinit();
+
+        if (!(try self.compiler.compile(source, &chunk))) {
+            return InterpretResult.COMPILE_ERROR;
+        }
+
+        self.chunk = &chunk;
+        self.ip = 0;
+
+        const result = self.run();
+        return result;
     }
 
     pub fn push(self: *VM, value: Value) void {
-        self.stack[self.stackTop] = value;
-        self.stackTop += 1;
+        self.stack[self.stack_top] = value;
+        self.stack_top += 1;
     }
 
     pub fn pop(self: *VM) Value {
-        self.stackTop -= 1;
-        return self.stack[self.stackTop];
+        self.stack_top -= 1;
+        return self.stack[self.stack_top];
     }
 
     pub fn peek(self: *VM) *Value {
-        return &self.stack[self.stackTop - 1];
+        return &self.stack[self.stack_top - 1];
     }
 
     pub fn resetStack(self: *VM) void {
-        self.stackTop = 0;
+        self.stack_top = 0;
     }
 
     inline fn readByte(self: *VM) u8 {
@@ -90,7 +103,7 @@ pub const VM = struct {
         while (true) {
             if (common.DEBUG_TRACE_EXECUTION) {
                 std.debug.print("          ", .{});
-                for (0..self.stackTop) |slot| {
+                for (0..self.stack_top) |slot| {
                     std.debug.print("[ ", .{});
                     printValue(self.stack[slot]);
                     std.debug.print(" ]", .{});
