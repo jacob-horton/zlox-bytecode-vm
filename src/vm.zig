@@ -1,12 +1,17 @@
 const std = @import("std");
-const Chunk = @import("chunk.zig").Chunk;
-const OpCode = @import("chunk.zig").OpCode;
-const printValue = @import("value.zig").printValue;
-const Value = @import("value.zig").Value;
-const Compiler = @import("kompiler.zig").Compiler;
-const common = @import("common.zig");
-const dissassembleInstruction = @import("debug.zig").dissassembleInstruction;
-const compiler = @import("kompiler.zig");
+
+const zlox_chunk = @import("chunk.zig");
+const zlox_value = @import("value.zig");
+const zlox_compiler = @import("kompiler.zig");
+const zlox_common = @import("common.zig");
+const zlox_debug = @import("debug.zig");
+
+const Chunk = zlox_chunk.Chunk;
+const OpCode = zlox_chunk.OpCode;
+
+const Value = zlox_value.Value;
+
+const Compiler = zlox_compiler.Compiler;
 
 const STACK_MAX = 256;
 
@@ -101,17 +106,17 @@ pub const VM = struct {
 
     pub fn run(self: *VM) InterpretResult {
         while (true) {
-            if (common.DEBUG_TRACE_EXECUTION) {
+            if (zlox_common.DEBUG_TRACE_EXECUTION) {
                 std.debug.print("          ", .{});
                 for (0..self.stack_top) |slot| {
                     std.debug.print("[ ", .{});
-                    printValue(self.stack[slot]);
+                    zlox_value.printValue(self.stack[slot]);
                     std.debug.print(" ]", .{});
                 }
 
                 std.debug.print("\n", .{});
 
-                _ = dissassembleInstruction(self.chunk.?, self.ip);
+                _ = zlox_debug.dissassembleInstruction(self.chunk.?, self.ip);
             }
 
             const instruction = self.readByte();
@@ -126,7 +131,7 @@ pub const VM = struct {
                 @intFromEnum(OpCode.DIVIDE) => self.binaryOp(divide),
                 @intFromEnum(OpCode.NEGATE) => self.peek().* = -self.peek().*,
                 @intFromEnum(OpCode.RETURN) => {
-                    printValue(self.pop());
+                    zlox_value.printValue(self.pop());
                     std.debug.print("\n", .{});
                     return InterpretResult.OK;
                 },

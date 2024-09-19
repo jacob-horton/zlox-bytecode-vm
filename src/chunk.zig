@@ -1,6 +1,9 @@
 const std = @import("std");
-const Value = @import("value.zig").Value;
-const ValueArray = @import("value.zig").ValueArray;
+
+const zlox_value = @import("value.zig");
+
+const Value = zlox_value.Value;
+const ValueArray = zlox_value.ValueArray;
 
 pub const OpCode = enum(u8) {
     CONSTANT,

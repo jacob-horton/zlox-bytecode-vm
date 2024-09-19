@@ -15,10 +15,6 @@ const OpCode = zlox_chunk.OpCode;
 
 const Value = zlox_value.Value;
 
-const DEBUG_PRINT_CODE = zlox_common.DEBUG_PRINT_CODE;
-
-const dissassembleChunk = zlox_debug.dissassembleChunk;
-
 const Parser = struct {
     current: ?Token,
     previous: ?Token,
@@ -188,8 +184,8 @@ pub const Compiler = struct {
     fn end(self: *Compiler) !void {
         try self.emitReturn();
 
-        if (DEBUG_PRINT_CODE and self.parser.had_error) {
-            dissassembleChunk(self.currentChunk(), "code");
+        if (zlox_common.DEBUG_PRINT_CODE and self.parser.had_error) {
+            zlox_debug.dissassembleChunk(self.currentChunk(), "code");
         }
     }
 

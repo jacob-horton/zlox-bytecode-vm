@@ -1,7 +1,10 @@
 const std = @import("std");
-const Chunk = @import("chunk.zig").Chunk;
-const OpCode = @import("chunk.zig").OpCode;
-const printValue = @import("value.zig").printValue;
+
+const zlox_chunk = @import("chunk.zig");
+const zlox_value = @import("value.zig");
+
+const Chunk = zlox_chunk.Chunk;
+const OpCode = zlox_chunk.OpCode;
 
 pub fn dissassembleChunk(chunk: *Chunk, name: []const u8) void {
     std.debug.print("== {s} ==\n", .{name});
@@ -39,7 +42,7 @@ pub fn dissassembleInstruction(chunk: *Chunk, offset: usize) usize {
 fn constantInstruction(name: []const u8, chunk: *Chunk, offset: usize) usize {
     const constant = chunk.code.items[offset + 1];
     std.debug.print("{s:<16} {d:4} '", .{ name, constant });
-    printValue(chunk.constants.items[constant]);
+    zlox_value.printValue(chunk.constants.items[constant]);
     std.debug.print("'\n", .{});
     return offset + 2;
 }

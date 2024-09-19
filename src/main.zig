@@ -1,9 +1,13 @@
 const std = @import("std");
-const Chunk = @import("chunk.zig").Chunk;
-const OpCode = @import("chunk.zig").OpCode;
-const debug = @import("debug.zig");
-const VM = @import("vm.zig").VM;
-const InterpretResult = @import("vm.zig").InterpretResult;
+
+const zlox_chunk = @import("chunk.zig");
+const zlox_vm = @import("vm.zig");
+
+const Chunk = zlox_chunk.Chunk;
+const OpCode = zlox_chunk.OpCode;
+
+const InterpretResult = zlox_vm.InterpretResult;
+const VM = zlox_vm.VM;
 
 fn repl(vm: *VM, allocator: std.mem.Allocator) !void {
     var input: [1024]u8 = undefined;
@@ -57,6 +61,4 @@ pub fn main() !void {
     } else {
         try repl(&vm, allocator);
     }
-
-    // debug.dissassembleChunk(&chunk, "test chunk");
 }
