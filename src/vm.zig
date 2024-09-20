@@ -10,6 +10,8 @@ const Chunk = zlox_chunk.Chunk;
 const OpCode = zlox_chunk.OpCode;
 
 const Value = zlox_value.Value;
+const ValueType = zlox_value.ValueType;
+const OperationError = zlox_value.OperationError;
 
 const Compiler = zlox_compiler.Compiler;
 
@@ -21,21 +23,7 @@ pub const InterpretResult = enum {
     RUNTIME_ERROR,
 };
 
-fn add(a: Value, b: Value) Value {
-    return a + b;
-}
-
-fn subtract(a: Value, b: Value) Value {
-    return a - b;
-}
-
-fn multiply(a: Value, b: Value) Value {
-    return a * b;
-}
-
-fn divide(a: Value, b: Value) Value {
-    return a / b;
-}
+const RuntimeError = error{ OperandNotNumeric, OperandsNotNumeric };
 
 pub const VM = struct {
     chunk: *Chunk,
@@ -72,22 +60,37 @@ pub const VM = struct {
         return result;
     }
 
-    pub fn push(self: *VM, value: Value) void {
+    fn push(self: *VM, value: Value) void {
         self.stack[self.stack_top] = value;
         self.stack_top += 1;
     }
 
-    pub fn pop(self: *VM) Value {
+    fn pop(self: *VM) Value {
         self.stack_top -= 1;
         return self.stack[self.stack_top];
     }
 
-    pub fn peek(self: *VM) *Value {
-        return &self.stack[self.stack_top - 1];
+    fn peek(self: *VM, distance: usize) *Value {
+        return &self.stack[self.stack_top - 1 - distance];
     }
 
-    pub fn resetStack(self: *VM) void {
+    fn resetStack(self: *VM) void {
         self.stack_top = 0;
+    }
+
+    fn runtimeError(self: *VM, err: RuntimeError) InterpretResult {
+        switch (err) {
+            RuntimeError.OperandsNotNumeric => std.debug.print("Operands must be numbers.", .{}),
+            RuntimeError.OperandNotNumeric => std.debug.print("Operand must be a number.", .{}),
+        }
+
+        std.debug.print("\n", .{});
+
+        const instruction = @intFromPtr(self.ip) - @intFromPtr(self.chunk.code.items.ptr) - 1;
+        std.debug.print("[line {d}] in script\n", .{self.chunk.getLine(instruction).?});
+        self.resetStack();
+
+        return InterpretResult.RUNTIME_ERROR;
     }
 
     inline fn readByte(self: *VM) u8 {
@@ -96,23 +99,25 @@ pub const VM = struct {
         return byte;
     }
 
-    inline fn readConstant(self: *VM) f64 {
+    fn readConstant(self: *VM) Value {
         return self.chunk.constants.items[self.readByte()];
     }
 
-    fn binaryOp(self: *VM, op: fn (a: Value, b: Value) Value) void {
+    fn binaryOp(self: *VM, op: fn (a: Value, b: Value) OperationError!Value) RuntimeError!void {
         const b = self.pop();
         const a = self.pop();
-        self.push(op(a, b));
+        self.push(op(a, b) catch |err| switch (err) {
+            OperationError.OperandsNotNumeric => return RuntimeError.OperandsNotNumeric,
+        });
     }
 
-    pub fn run(self: *VM) InterpretResult {
+    fn run(self: *VM) InterpretResult {
         while (true) {
             if (zlox_common.DEBUG_TRACE_EXECUTION) {
                 std.debug.print("          ", .{});
                 for (0..self.stack_top) |slot| {
                     std.debug.print("[ ", .{});
-                    zlox_value.printValue(self.stack[slot]);
+                    self.stack[slot].print();
                     std.debug.print(" ]", .{});
                 }
 
@@ -128,18 +133,34 @@ pub const VM = struct {
                     const constant = self.readConstant();
                     self.push(constant);
                 },
-                @intFromEnum(OpCode.ADD) => self.binaryOp(add),
-                @intFromEnum(OpCode.SUBTRACT) => self.binaryOp(subtract),
-                @intFromEnum(OpCode.MULTIPLY) => self.binaryOp(multiply),
-                @intFromEnum(OpCode.DIVIDE) => self.binaryOp(divide),
-                @intFromEnum(OpCode.NEGATE) => self.peek().* = -self.peek().*,
+                @intFromEnum(OpCode.NIL) => self.push(ValueType.nil),
+                @intFromEnum(OpCode.TRUE) => self.push(Value{ .boolean = true }),
+                @intFromEnum(OpCode.FALSE) => self.push(Value{ .boolean = false }),
+                @intFromEnum(OpCode.EQUAL) => {
+                    const b = self.pop();
+                    const a = self.pop();
+                    self.push(Value{ .boolean = Value.equals(a, b) });
+                },
+                @intFromEnum(OpCode.GREATER) => self.binaryOp(Value.greater) catch |err| return self.runtimeError(err),
+                @intFromEnum(OpCode.LESS) => self.binaryOp(Value.less) catch |err| return self.runtimeError(err),
+                @intFromEnum(OpCode.ADD) => self.binaryOp(Value.add) catch |err| return self.runtimeError(err),
+                @intFromEnum(OpCode.SUBTRACT) => self.binaryOp(Value.sub) catch |err| return self.runtimeError(err),
+                @intFromEnum(OpCode.MULTIPLY) => self.binaryOp(Value.mul) catch |err| return self.runtimeError(err),
+                @intFromEnum(OpCode.DIVIDE) => self.binaryOp(Value.div) catch |err| return self.runtimeError(err),
+                @intFromEnum(OpCode.NOT) => self.push(Value{ .boolean = self.pop().isFalsey() }),
+                @intFromEnum(OpCode.NEGATE) => {
+                    switch (self.peek(0).*) {
+                        .number => |*num| num.* = -num.*,
+                        else => return self.runtimeError(RuntimeError.OperandNotNumeric),
+                    }
+                },
                 @intFromEnum(OpCode.RETURN) => {
-                    zlox_value.printValue(self.pop());
+                    self.pop().print();
                     std.debug.print("\n", .{});
                     return InterpretResult.OK;
                 },
                 else => {
-                    std.debug.print("Unknown opcode {}\n", .{instruction});
+                    std.debug.print("Unknown opcode {d}\n", .{instruction});
                     return InterpretResult.COMPILE_ERROR;
                 },
             }

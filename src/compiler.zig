@@ -51,12 +51,21 @@ const rules = blk: {
     var _rules = [_]ParseRule{ParseRule{}} ** num_token_types;
 
     _rules[@intFromEnum(TokenType.LEFT_PAREN)] = ParseRule{ .prefix = Compiler.grouping };
-    _rules[@intFromEnum(TokenType.LEFT_PAREN)] = ParseRule{ .prefix = Compiler.grouping };
+    _rules[@intFromEnum(TokenType.BANG)] = ParseRule{ .prefix = &Compiler.unary };
+    _rules[@intFromEnum(TokenType.BANG_EQUAL)] = ParseRule{ .infix = &Compiler.binary, .precedence = Precedence.EQUALITY };
+    _rules[@intFromEnum(TokenType.EQUAL_EQUAL)] = ParseRule{ .infix = &Compiler.binary, .precedence = Precedence.EQUALITY };
+    _rules[@intFromEnum(TokenType.GREATER)] = ParseRule{ .infix = &Compiler.binary, .precedence = Precedence.COMPARISON };
+    _rules[@intFromEnum(TokenType.GREATER_EQUAL)] = ParseRule{ .infix = &Compiler.binary, .precedence = Precedence.COMPARISON };
+    _rules[@intFromEnum(TokenType.LESS)] = ParseRule{ .infix = &Compiler.binary, .precedence = Precedence.COMPARISON };
+    _rules[@intFromEnum(TokenType.LESS_EQUAL)] = ParseRule{ .infix = &Compiler.binary, .precedence = Precedence.COMPARISON };
     _rules[@intFromEnum(TokenType.MINUS)] = ParseRule{ .prefix = &Compiler.unary, .infix = Compiler.binary, .precedence = Precedence.TERM };
     _rules[@intFromEnum(TokenType.PLUS)] = ParseRule{ .infix = Compiler.binary, .precedence = Precedence.TERM };
     _rules[@intFromEnum(TokenType.SLASH)] = ParseRule{ .infix = Compiler.binary, .precedence = Precedence.FACTOR };
     _rules[@intFromEnum(TokenType.STAR)] = ParseRule{ .infix = Compiler.binary, .precedence = Precedence.FACTOR };
     _rules[@intFromEnum(TokenType.NUMBER)] = ParseRule{ .prefix = Compiler.number };
+    _rules[@intFromEnum(TokenType.FALSE)] = ParseRule{ .prefix = Compiler.literal };
+    _rules[@intFromEnum(TokenType.TRUE)] = ParseRule{ .prefix = Compiler.literal };
+    _rules[@intFromEnum(TokenType.NIL)] = ParseRule{ .prefix = Compiler.literal };
 
     break :blk _rules;
 };
@@ -113,7 +122,7 @@ pub const Compiler = struct {
     fn number(self: *Compiler) !void {
         const token = self.parser.previous;
         const value = try std.fmt.parseFloat(f64, token.start[0..token.length]);
-        try self.emitConstant(value);
+        try self.emitConstant(Value{ .number = value });
     }
 
     fn unary(self: *Compiler) !void {
@@ -125,6 +134,7 @@ pub const Compiler = struct {
         // Emit the op instruction
         switch (op_type) {
             TokenType.MINUS => try self.emitByte(@intFromEnum(OpCode.NEGATE)),
+            TokenType.BANG => try self.emitByte(@intFromEnum(OpCode.NOT)),
             else => unreachable,
         }
     }
@@ -135,10 +145,25 @@ pub const Compiler = struct {
         try self.parsePrecedence(@enumFromInt(@intFromEnum(rule.precedence) + 1));
 
         switch (op_type) {
+            TokenType.BANG_EQUAL => try self.emitBytes(@intFromEnum(OpCode.EQUAL), @intFromEnum(OpCode.NOT)),
+            TokenType.EQUAL_EQUAL => try self.emitByte(@intFromEnum(OpCode.EQUAL)),
+            TokenType.GREATER => try self.emitByte(@intFromEnum(OpCode.GREATER)),
+            TokenType.GREATER_EQUAL => try self.emitBytes(@intFromEnum(OpCode.LESS), @intFromEnum(OpCode.NOT)),
+            TokenType.LESS => try self.emitByte(@intFromEnum(OpCode.LESS)),
+            TokenType.LESS_EQUAL => try self.emitBytes(@intFromEnum(OpCode.GREATER), @intFromEnum(OpCode.NOT)),
             TokenType.PLUS => try self.emitByte(@intFromEnum(OpCode.ADD)),
             TokenType.MINUS => try self.emitByte(@intFromEnum(OpCode.SUBTRACT)),
             TokenType.STAR => try self.emitByte(@intFromEnum(OpCode.MULTIPLY)),
             TokenType.SLASH => try self.emitByte(@intFromEnum(OpCode.DIVIDE)),
+            else => unreachable,
+        }
+    }
+
+    fn literal(self: *Compiler) !void {
+        switch (self.parser.previous.type) {
+            TokenType.FALSE => try self.emitByte(@intFromEnum(OpCode.FALSE)),
+            TokenType.TRUE => try self.emitByte(@intFromEnum(OpCode.TRUE)),
+            TokenType.NIL => try self.emitByte(@intFromEnum(OpCode.NIL)),
             else => unreachable,
         }
     }

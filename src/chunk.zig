@@ -7,10 +7,17 @@ const ValueArray = zlox_value.ValueArray;
 
 pub const OpCode = enum(u8) {
     CONSTANT,
+    NIL,
+    TRUE,
+    FALSE,
+    EQUAL,
+    GREATER,
+    LESS,
     ADD,
     SUBTRACT,
     MULTIPLY,
     DIVIDE,
+    NOT,
     NEGATE,
     RETURN,
 };
