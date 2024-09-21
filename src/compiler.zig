@@ -153,6 +153,8 @@ pub const Compiler = struct {
     fn binary(self: *Compiler) !void {
         const op_type = self.parser.previous.type;
         const rule = getRule(op_type);
+
+        // +1 to make it left associative
         try self.parsePrecedence(@enumFromInt(@intFromEnum(rule.precedence) + 1));
 
         switch (op_type) {

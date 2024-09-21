@@ -79,10 +79,9 @@ pub const Value = union(ValueType) {
 
     fn concatenate(allocator: std.mem.Allocator, a: *String, b: *String) !Value {
         const len = a.chars.len + b.chars.len;
-        const chars = try allocator.alloc(u8, len + 1);
+        const chars = try allocator.alloc(u8, len);
         @memcpy(chars[0..a.chars.len], a.chars);
         @memcpy(chars[a.chars.len..len], b.chars);
-        chars[len] = 0;
 
         const str = try String.init(allocator, chars);
         return Value{ .obj = &str.obj };
