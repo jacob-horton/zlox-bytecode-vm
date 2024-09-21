@@ -15,25 +15,18 @@ pub const OperationError = error{
     ConcatenationError,
 };
 
-pub const ValueType = enum {
-    boolean,
-    number,
-    obj,
-    nil,
-};
-
-pub const Value = union(ValueType) {
+pub const Value = union(enum) {
     boolean: bool,
     number: f64,
     obj: *Obj,
-    nil: void,
+    nil,
 
     pub fn isFalsey(self: Value) bool {
-        return self == ValueType.nil or (self == ValueType.boolean and !self.boolean);
+        return self == .nil or (self == .boolean and !self.boolean);
     }
 
     pub fn isObjType(self: Value, typ: ObjType) bool {
-        return self == ValueType.obj and self.obj.type == typ;
+        return self == .obj and self.obj.type == typ;
     }
 
     pub fn print(self: Value) void {
@@ -46,7 +39,7 @@ pub const Value = union(ValueType) {
     }
 
     pub fn equals(a: Value, b: Value) bool {
-        if (@as(ValueType, a) != @as(ValueType, b)) return false;
+        if (@as(std.meta.Tag(Value), a) != @as(std.meta.Tag(Value), b)) return false;
 
         return switch (a) {
             .boolean => a.boolean == b.boolean,
@@ -62,16 +55,16 @@ pub const Value = union(ValueType) {
     }
 
     fn check_numeric(a: Value, b: Value) OperationError!void {
-        if (a != ValueType.number or b != ValueType.number) {
+        if (a != .number or b != .number) {
             return OperationError.ExpectBothNumeric;
         }
     }
 
     fn check_string(a: Value, b: Value) OperationError!void {
-        if (a != ValueType.obj or
-            b != ValueType.obj or
-            a.obj.type != ObjType.STRING or
-            b.obj.type != ObjType.STRING)
+        if (a != .obj or
+            b != .obj or
+            a.obj.type != .STRING or
+            b.obj.type != .STRING)
         {
             return OperationError.ExpectBothString;
         }

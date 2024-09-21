@@ -6,7 +6,6 @@ const zlox_vm = @import("vm.zig");
 const Chunk = zlox_chunk.Chunk;
 const OpCode = zlox_chunk.OpCode;
 
-const InterpretResult = zlox_vm.InterpretResult;
 const VM = zlox_vm.VM;
 
 fn repl(vm: *VM) !void {
@@ -26,6 +25,7 @@ fn repl(vm: *VM) !void {
 }
 
 fn readFile(allocator: std.mem.Allocator, path: []const u8) ![]u8 {
+    // TODO: remove 1MB restriction
     const mb = (1 << 10) << 10;
     return std.fs.cwd().readFileAlloc(allocator, path, mb);
 }
@@ -35,9 +35,9 @@ fn runFile(vm: *VM, allocator: std.mem.Allocator, path: []const u8) !void {
     defer allocator.free(contents);
 
     switch (try vm.interpret(contents)) {
-        InterpretResult.OK => {},
-        InterpretResult.COMPILE_ERROR => std.process.exit(65),
-        InterpretResult.RUNTIME_ERROR => std.process.exit(70),
+        .OK => {},
+        .COMPILE_ERROR => std.process.exit(65),
+        .RUNTIME_ERROR => std.process.exit(70),
     }
 }
 
@@ -45,6 +45,7 @@ pub fn main() !void {
     var args = std.process.args();
     _ = args.next();
 
+    // TODO: get rid of arena once sorted objects
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     var arena = std.heap.ArenaAllocator.init(gpa.allocator());
     defer {

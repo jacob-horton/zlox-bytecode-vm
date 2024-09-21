@@ -34,28 +34,28 @@ pub const Scanner = struct {
 
         self.start = self.current;
 
-        if (self.isAtEnd()) return self.makeToken(TokenType.EOF);
+        if (self.isAtEnd()) return self.makeToken(.EOF);
 
         const c = self.advance();
         if (isAlpha(c)) return self.identifier();
         if (isDigit(c)) return self.number();
 
         return switch (c) {
-            '(' => self.makeToken(TokenType.LEFT_PAREN),
-            ')' => self.makeToken(TokenType.RIGHT_PAREN),
-            '{' => self.makeToken(TokenType.LEFT_BRACE),
-            '}' => self.makeToken(TokenType.RIGHT_BRACE),
-            ';' => self.makeToken(TokenType.SEMICOLON),
-            ',' => self.makeToken(TokenType.COMMA),
-            '.' => self.makeToken(TokenType.DOT),
-            '-' => self.makeToken(TokenType.MINUS),
-            '+' => self.makeToken(TokenType.PLUS),
-            '/' => self.makeToken(TokenType.SLASH),
-            '*' => self.makeToken(TokenType.STAR),
-            '!' => self.makeToken(if (self.match('=')) TokenType.BANG_EQUAL else TokenType.BANG),
-            '=' => self.makeToken(if (self.match('=')) TokenType.EQUAL_EQUAL else TokenType.EQUAL),
-            '<' => self.makeToken(if (self.match('=')) TokenType.LESS_EQUAL else TokenType.LESS),
-            '>' => self.makeToken(if (self.match('=')) TokenType.GREATER_EQUAL else TokenType.GREATER),
+            '(' => self.makeToken(.LEFT_PAREN),
+            ')' => self.makeToken(.RIGHT_PAREN),
+            '{' => self.makeToken(.LEFT_BRACE),
+            '}' => self.makeToken(.RIGHT_BRACE),
+            ';' => self.makeToken(.SEMICOLON),
+            ',' => self.makeToken(.COMMA),
+            '.' => self.makeToken(.DOT),
+            '-' => self.makeToken(.MINUS),
+            '+' => self.makeToken(.PLUS),
+            '/' => self.makeToken(.SLASH),
+            '*' => self.makeToken(.STAR),
+            '!' => self.makeToken(if (self.match('=')) .BANG_EQUAL else .BANG),
+            '=' => self.makeToken(if (self.match('=')) .EQUAL_EQUAL else .EQUAL),
+            '<' => self.makeToken(if (self.match('=')) .LESS_EQUAL else .LESS),
+            '>' => self.makeToken(if (self.match('=')) .GREATER_EQUAL else .GREATER),
             '"' => self.string(),
             else => self.errorToken("Unexpected character."),
         };
@@ -68,40 +68,40 @@ pub const Scanner = struct {
 
     fn identifierType(self: *Scanner) TokenType {
         switch (self.start[0]) {
-            'a' => return self.checkKeyword(1, "nd", TokenType.AND),
-            'c' => return self.checkKeyword(1, "lass", TokenType.CLASS),
-            'e' => return self.checkKeyword(1, "lse", TokenType.ELSE),
+            'a' => return self.checkKeyword(1, "nd", .AND),
+            'c' => return self.checkKeyword(1, "lass", .CLASS),
+            'e' => return self.checkKeyword(1, "lse", .ELSE),
             'f' => {
                 if (zlox_common.ptrOffset(u8, self.start, self.current) > 1) {
                     switch (self.start[1]) {
-                        'a' => return self.checkKeyword(2, "lse", TokenType.FALSE),
-                        'o' => return self.checkKeyword(2, "r", TokenType.FOR),
-                        'u' => return self.checkKeyword(2, "n", TokenType.FUN),
+                        'a' => return self.checkKeyword(2, "lse", .FALSE),
+                        'o' => return self.checkKeyword(2, "r", .FOR),
+                        'u' => return self.checkKeyword(2, "n", .FUN),
                         else => {},
                     }
                 }
             },
-            'i' => return self.checkKeyword(1, "f", TokenType.IF),
-            'n' => return self.checkKeyword(1, "il", TokenType.NIL),
-            'o' => return self.checkKeyword(1, "r", TokenType.OR),
-            'p' => return self.checkKeyword(1, "rint", TokenType.PRINT),
-            'r' => return self.checkKeyword(1, "eturn", TokenType.RETURN),
-            's' => return self.checkKeyword(1, "uper", TokenType.SUPER),
+            'i' => return self.checkKeyword(1, "f", .IF),
+            'n' => return self.checkKeyword(1, "il", .NIL),
+            'o' => return self.checkKeyword(1, "r", .OR),
+            'p' => return self.checkKeyword(1, "rint", .PRINT),
+            'r' => return self.checkKeyword(1, "eturn", .RETURN),
+            's' => return self.checkKeyword(1, "uper", .SUPER),
             't' => {
                 if (zlox_common.ptrOffset(u8, self.start, self.current) > 1) {
                     switch (self.start[1]) {
-                        'h' => return self.checkKeyword(2, "is", TokenType.THIS),
-                        'r' => return self.checkKeyword(2, "ue", TokenType.TRUE),
+                        'h' => return self.checkKeyword(2, "is", .THIS),
+                        'r' => return self.checkKeyword(2, "ue", .TRUE),
                         else => {},
                     }
                 }
             },
-            'v' => return self.checkKeyword(1, "ar", TokenType.VAR),
-            'w' => return self.checkKeyword(1, "hile", TokenType.WHILE),
+            'v' => return self.checkKeyword(1, "ar", .VAR),
+            'w' => return self.checkKeyword(1, "hile", .WHILE),
             else => {},
         }
 
-        return TokenType.IDENTIFIER;
+        return .IDENTIFIER;
     }
 
     fn checkKeyword(self: *Scanner, start: usize, rest: []const u8, typ: TokenType) TokenType {
@@ -109,7 +109,7 @@ pub const Scanner = struct {
             return typ;
         }
 
-        return TokenType.IDENTIFIER;
+        return .IDENTIFIER;
     }
 
     fn number(self: *Scanner) Token {
@@ -121,7 +121,7 @@ pub const Scanner = struct {
             while (isDigit(self.peek())) _ = self.advance();
         }
 
-        return self.makeToken(TokenType.NUMBER);
+        return self.makeToken(.NUMBER);
     }
 
     fn string(self: *Scanner) Token {
@@ -134,7 +134,7 @@ pub const Scanner = struct {
 
         // Consume closing quote
         _ = self.advance();
-        return self.makeToken(TokenType.STRING);
+        return self.makeToken(.STRING);
     }
 
     fn skipWhitespace(self: *Scanner) !void {
@@ -200,7 +200,7 @@ pub const Scanner = struct {
 
     fn errorToken(self: *Scanner, message: []const u8) Token {
         return Token{
-            .type = TokenType.ERROR,
+            .type = .ERROR,
             .start = message.ptr,
             .length = message.len,
             .line = self.line,

@@ -15,7 +15,6 @@ const Compiler = zlox_compiler.Compiler;
 const Obj = zlox_object.Obj;
 
 const Value = zlox_value.Value;
-const ValueType = zlox_value.ValueType;
 const OperationError = zlox_value.OperationError;
 
 const STACK_MAX = 256;
@@ -63,7 +62,7 @@ pub const VM = struct {
         defer chunk.deinit();
 
         if (!(try self.compiler.compile(source, &chunk))) {
-            return InterpretResult.COMPILE_ERROR;
+            return .COMPILE_ERROR;
         }
 
         self.chunk = &chunk;
@@ -106,7 +105,7 @@ pub const VM = struct {
         std.debug.print("[line {d}] in script\n", .{self.chunk.getLine(instruction).?});
         self.resetStack();
 
-        return InterpretResult.RUNTIME_ERROR;
+        return .RUNTIME_ERROR;
     }
 
     inline fn readByte(self: *VM) u8 {
@@ -155,7 +154,7 @@ pub const VM = struct {
                     const constant = self.readConstant();
                     self.push(constant);
                 },
-                @intFromEnum(OpCode.NIL) => self.push(ValueType.nil),
+                @intFromEnum(OpCode.NIL) => self.push(.nil),
                 @intFromEnum(OpCode.TRUE) => self.push(Value{ .boolean = true }),
                 @intFromEnum(OpCode.FALSE) => self.push(Value{ .boolean = false }),
                 @intFromEnum(OpCode.EQUAL) => {
@@ -179,11 +178,11 @@ pub const VM = struct {
                 @intFromEnum(OpCode.RETURN) => {
                     self.pop().print();
                     std.debug.print("\n", .{});
-                    return InterpretResult.OK;
+                    return .OK;
                 },
                 else => {
                     std.debug.print("Unknown opcode {d}\n", .{instruction});
-                    return InterpretResult.COMPILE_ERROR;
+                    return .COMPILE_ERROR;
                 },
             }
         }

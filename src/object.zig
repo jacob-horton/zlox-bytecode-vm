@@ -21,7 +21,7 @@ pub const Obj = struct {
 
     pub fn print(self: *Obj) void {
         switch (self.type) {
-            ObjType.STRING => {
+            .STRING => {
                 const str = self.asString();
                 std.debug.print("{s}", .{str.chars});
             },
@@ -38,7 +38,7 @@ pub const Obj = struct {
 
         /// Takes the chars, without copying
         pub fn init(allocator: std.mem.Allocator, chars: []const u8) !*String {
-            const str = (try Obj.init(allocator, String, ObjType.STRING)).asString();
+            const str = (try Obj.init(allocator, String, .STRING)).asString();
             str.chars = chars;
 
             return str;

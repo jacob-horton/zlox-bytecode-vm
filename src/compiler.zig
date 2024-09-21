@@ -44,27 +44,27 @@ const ParseFn = *const fn (self: *Compiler) anyerror!void;
 const ParseRule = struct {
     prefix: ?ParseFn = null,
     infix: ?ParseFn = null,
-    precedence: Precedence = Precedence.NONE,
+    precedence: Precedence = .NONE,
 };
 
 const rules = blk: {
     const num_token_types = @typeInfo(TokenType).Enum.fields.len;
 
-    // Rules for each token type. Default is { .infix = null, .prefix = null, .precedence = Precedence.NONE }
+    // Rules for each token type. Default is { .infix = null, .prefix = null, .precedence = .NONE }
     var _rules = [_]ParseRule{ParseRule{}} ** num_token_types;
 
     _rules[@intFromEnum(TokenType.LEFT_PAREN)] = ParseRule{ .prefix = Compiler.grouping };
     _rules[@intFromEnum(TokenType.BANG)] = ParseRule{ .prefix = &Compiler.unary };
-    _rules[@intFromEnum(TokenType.BANG_EQUAL)] = ParseRule{ .infix = &Compiler.binary, .precedence = Precedence.EQUALITY };
-    _rules[@intFromEnum(TokenType.EQUAL_EQUAL)] = ParseRule{ .infix = &Compiler.binary, .precedence = Precedence.EQUALITY };
-    _rules[@intFromEnum(TokenType.GREATER)] = ParseRule{ .infix = &Compiler.binary, .precedence = Precedence.COMPARISON };
-    _rules[@intFromEnum(TokenType.GREATER_EQUAL)] = ParseRule{ .infix = &Compiler.binary, .precedence = Precedence.COMPARISON };
-    _rules[@intFromEnum(TokenType.LESS)] = ParseRule{ .infix = &Compiler.binary, .precedence = Precedence.COMPARISON };
-    _rules[@intFromEnum(TokenType.LESS_EQUAL)] = ParseRule{ .infix = &Compiler.binary, .precedence = Precedence.COMPARISON };
-    _rules[@intFromEnum(TokenType.MINUS)] = ParseRule{ .prefix = &Compiler.unary, .infix = Compiler.binary, .precedence = Precedence.TERM };
-    _rules[@intFromEnum(TokenType.PLUS)] = ParseRule{ .infix = Compiler.binary, .precedence = Precedence.TERM };
-    _rules[@intFromEnum(TokenType.SLASH)] = ParseRule{ .infix = Compiler.binary, .precedence = Precedence.FACTOR };
-    _rules[@intFromEnum(TokenType.STAR)] = ParseRule{ .infix = Compiler.binary, .precedence = Precedence.FACTOR };
+    _rules[@intFromEnum(TokenType.BANG_EQUAL)] = ParseRule{ .infix = &Compiler.binary, .precedence = .EQUALITY };
+    _rules[@intFromEnum(TokenType.EQUAL_EQUAL)] = ParseRule{ .infix = &Compiler.binary, .precedence = .EQUALITY };
+    _rules[@intFromEnum(TokenType.GREATER)] = ParseRule{ .infix = &Compiler.binary, .precedence = .COMPARISON };
+    _rules[@intFromEnum(TokenType.GREATER_EQUAL)] = ParseRule{ .infix = &Compiler.binary, .precedence = .COMPARISON };
+    _rules[@intFromEnum(TokenType.LESS)] = ParseRule{ .infix = &Compiler.binary, .precedence = .COMPARISON };
+    _rules[@intFromEnum(TokenType.LESS_EQUAL)] = ParseRule{ .infix = &Compiler.binary, .precedence = .COMPARISON };
+    _rules[@intFromEnum(TokenType.MINUS)] = ParseRule{ .prefix = &Compiler.unary, .infix = Compiler.binary, .precedence = .TERM };
+    _rules[@intFromEnum(TokenType.PLUS)] = ParseRule{ .infix = Compiler.binary, .precedence = .TERM };
+    _rules[@intFromEnum(TokenType.SLASH)] = ParseRule{ .infix = Compiler.binary, .precedence = .FACTOR };
+    _rules[@intFromEnum(TokenType.STAR)] = ParseRule{ .infix = Compiler.binary, .precedence = .FACTOR };
     _rules[@intFromEnum(TokenType.STRING)] = ParseRule{ .prefix = Compiler.string };
     _rules[@intFromEnum(TokenType.NUMBER)] = ParseRule{ .prefix = Compiler.number };
     _rules[@intFromEnum(TokenType.FALSE)] = ParseRule{ .prefix = Compiler.literal };
@@ -109,7 +109,7 @@ pub const Compiler = struct {
 
         self.advance();
         try self.expression();
-        self.consume(TokenType.EOF, "Expect end of expression.");
+        self.consume(.EOF, "Expect end of expression.");
 
         try self.end();
 
@@ -117,12 +117,12 @@ pub const Compiler = struct {
     }
 
     fn expression(self: *Compiler) !void {
-        try self.parsePrecedence(Precedence.ASSIGNMENT);
+        try self.parsePrecedence(.ASSIGNMENT);
     }
 
     fn grouping(self: *Compiler) !void {
         try self.expression();
-        self.consume(TokenType.RIGHT_PAREN, "Expect ')' after expression");
+        self.consume(.RIGHT_PAREN, "Expect ')' after expression");
     }
 
     fn number(self: *Compiler) !void {
@@ -140,12 +140,12 @@ pub const Compiler = struct {
         const op_type = self.parser.previous.type;
 
         // Compile the operand
-        try self.parsePrecedence(Precedence.UNARY);
+        try self.parsePrecedence(.UNARY);
 
         // Emit the op instruction
         switch (op_type) {
-            TokenType.MINUS => try self.emitByte(@intFromEnum(OpCode.NEGATE)),
-            TokenType.BANG => try self.emitByte(@intFromEnum(OpCode.NOT)),
+            .MINUS => try self.emitByte(@intFromEnum(OpCode.NEGATE)),
+            .BANG => try self.emitByte(@intFromEnum(OpCode.NOT)),
             else => unreachable,
         }
     }
@@ -158,25 +158,25 @@ pub const Compiler = struct {
         try self.parsePrecedence(@enumFromInt(@intFromEnum(rule.precedence) + 1));
 
         switch (op_type) {
-            TokenType.BANG_EQUAL => try self.emitBytes(@intFromEnum(OpCode.EQUAL), @intFromEnum(OpCode.NOT)),
-            TokenType.EQUAL_EQUAL => try self.emitByte(@intFromEnum(OpCode.EQUAL)),
-            TokenType.GREATER => try self.emitByte(@intFromEnum(OpCode.GREATER)),
-            TokenType.GREATER_EQUAL => try self.emitBytes(@intFromEnum(OpCode.LESS), @intFromEnum(OpCode.NOT)),
-            TokenType.LESS => try self.emitByte(@intFromEnum(OpCode.LESS)),
-            TokenType.LESS_EQUAL => try self.emitBytes(@intFromEnum(OpCode.GREATER), @intFromEnum(OpCode.NOT)),
-            TokenType.PLUS => try self.emitByte(@intFromEnum(OpCode.ADD)),
-            TokenType.MINUS => try self.emitByte(@intFromEnum(OpCode.SUBTRACT)),
-            TokenType.STAR => try self.emitByte(@intFromEnum(OpCode.MULTIPLY)),
-            TokenType.SLASH => try self.emitByte(@intFromEnum(OpCode.DIVIDE)),
+            .BANG_EQUAL => try self.emitBytes(@intFromEnum(OpCode.EQUAL), @intFromEnum(OpCode.NOT)),
+            .EQUAL_EQUAL => try self.emitByte(@intFromEnum(OpCode.EQUAL)),
+            .GREATER => try self.emitByte(@intFromEnum(OpCode.GREATER)),
+            .GREATER_EQUAL => try self.emitBytes(@intFromEnum(OpCode.LESS), @intFromEnum(OpCode.NOT)),
+            .LESS => try self.emitByte(@intFromEnum(OpCode.LESS)),
+            .LESS_EQUAL => try self.emitBytes(@intFromEnum(OpCode.GREATER), @intFromEnum(OpCode.NOT)),
+            .PLUS => try self.emitByte(@intFromEnum(OpCode.ADD)),
+            .MINUS => try self.emitByte(@intFromEnum(OpCode.SUBTRACT)),
+            .STAR => try self.emitByte(@intFromEnum(OpCode.MULTIPLY)),
+            .SLASH => try self.emitByte(@intFromEnum(OpCode.DIVIDE)),
             else => unreachable,
         }
     }
 
     fn literal(self: *Compiler) !void {
         switch (self.parser.previous.type) {
-            TokenType.FALSE => try self.emitByte(@intFromEnum(OpCode.FALSE)),
-            TokenType.TRUE => try self.emitByte(@intFromEnum(OpCode.TRUE)),
-            TokenType.NIL => try self.emitByte(@intFromEnum(OpCode.NIL)),
+            .FALSE => try self.emitByte(@intFromEnum(OpCode.FALSE)),
+            .TRUE => try self.emitByte(@intFromEnum(OpCode.TRUE)),
+            .NIL => try self.emitByte(@intFromEnum(OpCode.NIL)),
             else => unreachable,
         }
     }
@@ -206,7 +206,7 @@ pub const Compiler = struct {
             self.parser.current = self.scanner.scanToken();
             const current_token = self.parser.current;
 
-            if (current_token.type != TokenType.ERROR) break;
+            if (current_token.type != .ERROR) break;
 
             self.errAtCurrent(current_token.start[0..current_token.length]);
         }
@@ -274,9 +274,9 @@ pub const Compiler = struct {
 
         std.debug.print("[line {d}] Error", .{token.*.line});
 
-        if (token.*.type == TokenType.EOF) {
+        if (token.*.type == .EOF) {
             std.debug.print(" at end", .{});
-        } else if (token.*.type != TokenType.ERROR) {
+        } else if (token.*.type != .ERROR) {
             std.debug.print(" at '{s}'", .{token.*.start[0..token.*.length]});
         }
 
