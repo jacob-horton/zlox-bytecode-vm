@@ -1,5 +1,7 @@
 const std = @import("std");
 
+const zlox_common = @import("common.zig");
+
 const WhitespaceError = error{UnterminatedMultilineComment};
 
 fn isDigit(c: u8) bool {
@@ -70,7 +72,7 @@ pub const Scanner = struct {
             'c' => return self.checkKeyword(1, "lass", TokenType.CLASS),
             'e' => return self.checkKeyword(1, "lse", TokenType.ELSE),
             'f' => {
-                if (@intFromPtr(self.current) - @intFromPtr(self.start) > 1) {
+                if (zlox_common.ptrOffset(u8, self.start, self.current) > 1) {
                     switch (self.start[1]) {
                         'a' => return self.checkKeyword(2, "lse", TokenType.FALSE),
                         'o' => return self.checkKeyword(2, "r", TokenType.FOR),
@@ -86,7 +88,7 @@ pub const Scanner = struct {
             'r' => return self.checkKeyword(1, "eturn", TokenType.RETURN),
             's' => return self.checkKeyword(1, "uper", TokenType.SUPER),
             't' => {
-                if (@intFromPtr(self.current) - @intFromPtr(self.start) > 1) {
+                if (zlox_common.ptrOffset(u8, self.start, self.current) > 1) {
                     switch (self.start[1]) {
                         'h' => return self.checkKeyword(2, "is", TokenType.THIS),
                         'r' => return self.checkKeyword(2, "ue", TokenType.TRUE),
@@ -191,7 +193,7 @@ pub const Scanner = struct {
         return Token{
             .type = typ,
             .start = self.start,
-            .length = @intFromPtr(self.current) - @intFromPtr(self.start),
+            .length = zlox_common.ptrOffset(u8, self.start, self.current),
             .line = self.line,
         };
     }

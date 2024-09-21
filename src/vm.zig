@@ -102,7 +102,7 @@ pub const VM = struct {
 
         std.debug.print("\n", .{});
 
-        const instruction = @intFromPtr(self.ip) - @intFromPtr(self.chunk.code.items.ptr) - 1;
+        const instruction = zlox_common.ptrOffset(u8, self.chunk.code.items.ptr, self.ip);
         std.debug.print("[line {d}] in script\n", .{self.chunk.getLine(instruction).?});
         self.resetStack();
 
@@ -131,6 +131,8 @@ pub const VM = struct {
     }
 
     fn run(self: *VM) InterpretResult {
+        var prev_offset: usize = 0;
+
         while (true) {
             if (zlox_common.DEBUG_TRACE_EXECUTION) {
                 std.debug.print("          ", .{});
@@ -142,8 +144,9 @@ pub const VM = struct {
 
                 std.debug.print("\n", .{});
 
-                const offset = @intFromPtr(self.ip) - @intFromPtr(self.chunk.code.items.ptr);
-                _ = zlox_debug.disassembleInstruction(self.chunk, offset);
+                const offset = zlox_common.ptrOffset(u8, self.chunk.code.items.ptr, self.ip);
+                _ = zlox_debug.disassembleInstruction(self.chunk, offset, prev_offset);
+                prev_offset = offset;
             }
 
             const instruction = self.readByte();

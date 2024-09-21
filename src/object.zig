@@ -9,6 +9,7 @@ pub const ObjType = enum {
 pub const Obj = struct {
     type: ObjType,
 
+    // TODO: take VM as argument here and in deinit to allow for linked list of objs
     pub fn init(allocator: std.mem.Allocator, comptime T: type, typ: ObjType) !*Obj {
         const ptr = try allocator.create(T);
         ptr.obj = Obj{

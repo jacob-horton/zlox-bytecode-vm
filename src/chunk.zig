@@ -43,6 +43,7 @@ pub const Chunk = struct {
     fn addLine(self: *Chunk, line: usize) !void {
         if (self.lines.items.len == 0) {
             try self.lines.append(RleItem{ .val = line, .count = 1 });
+            return;
         }
 
         var last: *RleItem = &self.lines.items[self.lines.items.len - 1];
@@ -57,22 +58,22 @@ pub const Chunk = struct {
     pub fn getLine(self: *Chunk, offset: usize) ?usize {
         // Decode the RLE
         var counter: usize = 0;
-        var currentLine: ?usize = null;
+        var current_line: ?usize = null;
 
         for (self.lines.items) |line| {
-            if (counter > offset) {
+            if (offset < counter) {
                 break;
             }
 
             counter += line.count;
-            currentLine = line.val;
+            current_line = line.val;
         }
 
         if (counter <= offset) {
             return null;
         }
 
-        return currentLine;
+        return current_line;
     }
 
     pub fn write(self: *Chunk, data: u8, line: usize) !void {

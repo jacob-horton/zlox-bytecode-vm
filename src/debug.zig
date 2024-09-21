@@ -9,17 +9,20 @@ pub fn dissassembleChunk(chunk: *Chunk, name: []const u8) void {
     std.debug.print("== {s} ==\n", .{name});
 
     var offset: usize = 0;
+    var prev_offset: usize = 0;
     while (offset < chunk.code.items.len) {
-        offset = disassembleInstruction(chunk, offset);
+        const new_offset = disassembleInstruction(chunk, offset, prev_offset);
+        prev_offset = offset;
+        offset = new_offset;
     }
 }
 
-pub fn disassembleInstruction(chunk: *Chunk, offset: usize) usize {
+pub fn disassembleInstruction(chunk: *Chunk, offset: usize, prev_offset: usize) usize {
     std.debug.print("{d:4} ", .{offset});
-    if (offset > 0 and (chunk.getLine(offset) == chunk.getLine(offset - 1))) {
+    if (offset > 0 and (chunk.getLine(offset) == chunk.getLine(prev_offset))) {
         std.debug.print("   | ", .{});
     } else {
-        std.debug.print("{d:4} ", .{chunk.getLine(offset).?});
+        std.debug.print("{?d:4} ", .{chunk.getLine(offset)});
     }
 
     const instruction = chunk.code.items[offset];
