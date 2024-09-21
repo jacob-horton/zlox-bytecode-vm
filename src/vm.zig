@@ -1,19 +1,22 @@
 const std = @import("std");
 
 const zlox_chunk = @import("chunk.zig");
-const zlox_value = @import("value.zig");
-const zlox_compiler = @import("compiler.zig");
 const zlox_common = @import("common.zig");
+const zlox_compiler = @import("compiler.zig");
 const zlox_debug = @import("debug.zig");
+const zlox_object = @import("object.zig");
+const zlox_value = @import("value.zig");
 
 const Chunk = zlox_chunk.Chunk;
 const OpCode = zlox_chunk.OpCode;
 
+const Compiler = zlox_compiler.Compiler;
+
+const Obj = zlox_object.Obj;
+
 const Value = zlox_value.Value;
 const ValueType = zlox_value.ValueType;
 const OperationError = zlox_value.OperationError;
-
-const Compiler = zlox_compiler.Compiler;
 
 const STACK_MAX = 256;
 
@@ -23,17 +26,27 @@ pub const InterpretResult = enum {
     RUNTIME_ERROR,
 };
 
-const RuntimeError = error{ OperandNotNumeric, OperandsNotNumeric };
+const RuntimeError = error{
+    ExpectOperandNumeric,
+    ExpectBothOperandsNumeric,
+    ExpectBothOperandsString,
+    ExpectBothOperandsStringOrBothNumeric,
+    ConcatenationError,
+};
 
 pub const VM = struct {
     chunk: *Chunk,
     ip: [*]u8,
     stack: [STACK_MAX]Value,
     stack_top: usize,
-    compiler: Compiler,
 
-    pub fn init() VM {
+    compiler: Compiler,
+    allocator: std.mem.Allocator,
+
+    pub fn init(allocator: std.mem.Allocator) VM {
         return VM{
+            .allocator = allocator,
+
             // These will get set up when calling `interpret()` before doing anything
             .chunk = undefined,
             .ip = undefined,
@@ -41,12 +54,12 @@ pub const VM = struct {
             // We define specific stack slots as we get to them, so undefined is fine
             .stack = undefined,
             .stack_top = 0,
-            .compiler = Compiler.init(),
+            .compiler = Compiler.init(allocator),
         };
     }
 
-    pub fn interpret(self: *VM, allocator: std.mem.Allocator, source: []u8) !InterpretResult {
-        var chunk = Chunk.init(allocator);
+    pub fn interpret(self: *VM, source: []u8) !InterpretResult {
+        var chunk = Chunk.init(self.allocator);
         defer chunk.deinit();
 
         if (!(try self.compiler.compile(source, &chunk))) {
@@ -80,8 +93,11 @@ pub const VM = struct {
 
     fn runtimeError(self: *VM, err: RuntimeError) InterpretResult {
         switch (err) {
-            RuntimeError.OperandsNotNumeric => std.debug.print("Operands must be numbers.", .{}),
-            RuntimeError.OperandNotNumeric => std.debug.print("Operand must be a number.", .{}),
+            RuntimeError.ExpectBothOperandsNumeric => std.debug.print("Operands must be numbers.", .{}),
+            RuntimeError.ExpectBothOperandsString => std.debug.print("Operands must be strings.", .{}),
+            RuntimeError.ExpectBothOperandsStringOrBothNumeric => std.debug.print("Operands must be both strings or both numbers.", .{}),
+            RuntimeError.ExpectOperandNumeric => std.debug.print("Operand must be a number.", .{}),
+            RuntimeError.ConcatenationError => std.debug.print("Failed to concatenate", .{}),
         }
 
         std.debug.print("\n", .{});
@@ -103,11 +119,14 @@ pub const VM = struct {
         return self.chunk.constants.items[self.readByte()];
     }
 
-    fn binaryOp(self: *VM, op: fn (a: Value, b: Value) OperationError!Value) RuntimeError!void {
+    fn binaryOp(self: *VM, op: fn (allocator: std.mem.Allocator, a: Value, b: Value) OperationError!Value) RuntimeError!void {
         const b = self.pop();
         const a = self.pop();
-        self.push(op(a, b) catch |err| switch (err) {
-            OperationError.OperandsNotNumeric => return RuntimeError.OperandsNotNumeric,
+        self.push(op(self.allocator, a, b) catch |err| switch (err) {
+            OperationError.ExpectBothNumeric => return RuntimeError.ExpectBothOperandsNumeric,
+            OperationError.ExpectBothString => return RuntimeError.ExpectBothOperandsString,
+            OperationError.ExpectBothStringOrBothNumeric => return RuntimeError.ExpectBothOperandsStringOrBothNumeric,
+            OperationError.ConcatenationError => return RuntimeError.ConcatenationError,
         });
     }
 
@@ -151,7 +170,7 @@ pub const VM = struct {
                 @intFromEnum(OpCode.NEGATE) => {
                     switch (self.peek(0).*) {
                         .number => |*num| num.* = -num.*,
-                        else => return self.runtimeError(RuntimeError.OperandNotNumeric),
+                        else => return self.runtimeError(RuntimeError.ExpectOperandNumeric),
                     }
                 },
                 @intFromEnum(OpCode.RETURN) => {

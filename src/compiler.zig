@@ -1,17 +1,20 @@
 const std = @import("std");
 
-const zlox_scanner = @import("scanner.zig");
 const zlox_chunk = @import("chunk.zig");
-const zlox_value = @import("value.zig");
 const zlox_common = @import("common.zig");
 const zlox_debug = @import("debug.zig");
+const zlox_object = @import("object.zig");
+const zlox_scanner = @import("scanner.zig");
+const zlox_value = @import("value.zig");
+
+const Chunk = zlox_chunk.Chunk;
+const OpCode = zlox_chunk.OpCode;
+
+const String = zlox_object.Obj.String;
 
 const Scanner = zlox_scanner.Scanner;
 const Token = zlox_scanner.Token;
 const TokenType = zlox_scanner.TokenType;
-
-const Chunk = zlox_chunk.Chunk;
-const OpCode = zlox_chunk.OpCode;
 
 const Value = zlox_value.Value;
 
@@ -62,6 +65,7 @@ const rules = blk: {
     _rules[@intFromEnum(TokenType.PLUS)] = ParseRule{ .infix = Compiler.binary, .precedence = Precedence.TERM };
     _rules[@intFromEnum(TokenType.SLASH)] = ParseRule{ .infix = Compiler.binary, .precedence = Precedence.FACTOR };
     _rules[@intFromEnum(TokenType.STAR)] = ParseRule{ .infix = Compiler.binary, .precedence = Precedence.FACTOR };
+    _rules[@intFromEnum(TokenType.STRING)] = ParseRule{ .prefix = Compiler.string };
     _rules[@intFromEnum(TokenType.NUMBER)] = ParseRule{ .prefix = Compiler.number };
     _rules[@intFromEnum(TokenType.FALSE)] = ParseRule{ .prefix = Compiler.literal };
     _rules[@intFromEnum(TokenType.TRUE)] = ParseRule{ .prefix = Compiler.literal };
@@ -78,9 +82,11 @@ pub const Compiler = struct {
     parser: Parser,
     scanner: Scanner,
     compiling_chunk: *Chunk,
+    allocator: std.mem.Allocator,
 
-    pub fn init() Compiler {
+    pub fn init(allocator: std.mem.Allocator) Compiler {
         return Compiler{
+            .allocator = allocator,
             .parser = Parser{
                 .had_error = false,
                 .panic_mode = false,
@@ -123,6 +129,11 @@ pub const Compiler = struct {
         const token = self.parser.previous;
         const value = try std.fmt.parseFloat(f64, token.start[0..token.length]);
         try self.emitConstant(Value{ .number = value });
+    }
+
+    fn string(self: *Compiler) !void {
+        const str = try String.copyInit(self.allocator, self.parser.previous.start + 1, self.parser.previous.length - 2);
+        try self.emitConstant(Value{ .obj = &str.obj });
     }
 
     fn unary(self: *Compiler) !void {

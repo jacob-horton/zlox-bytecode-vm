@@ -9,7 +9,7 @@ const OpCode = zlox_chunk.OpCode;
 const InterpretResult = zlox_vm.InterpretResult;
 const VM = zlox_vm.VM;
 
-fn repl(vm: *VM, allocator: std.mem.Allocator) !void {
+fn repl(vm: *VM) !void {
     var input: [1024]u8 = undefined;
     const stdin = std.io.getStdIn().reader();
 
@@ -21,7 +21,7 @@ fn repl(vm: *VM, allocator: std.mem.Allocator) !void {
             return;
         };
 
-        _ = try vm.interpret(allocator, line);
+        _ = try vm.interpret(line);
     }
 }
 
@@ -34,7 +34,7 @@ fn runFile(vm: *VM, allocator: std.mem.Allocator, path: []const u8) !void {
     const contents = try readFile(allocator, path);
     defer allocator.free(contents);
 
-    switch (try vm.interpret(allocator, contents)) {
+    switch (try vm.interpret(contents)) {
         InterpretResult.OK => {},
         InterpretResult.COMPILE_ERROR => std.process.exit(65),
         InterpretResult.RUNTIME_ERROR => std.process.exit(70),
@@ -46,10 +46,15 @@ pub fn main() !void {
     _ = args.next();
 
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    const allocator = gpa.allocator();
-    defer _ = gpa.deinit();
+    var arena = std.heap.ArenaAllocator.init(gpa.allocator());
+    defer {
+        arena.deinit();
+        _ = gpa.deinit();
+    }
 
-    var vm = VM.init();
+    const allocator = arena.allocator();
+
+    var vm = VM.init(allocator);
 
     if (args.next()) |file_name| {
         if (args.next() != null) {
@@ -59,6 +64,6 @@ pub fn main() !void {
 
         try runFile(&vm, allocator, file_name);
     } else {
-        try repl(&vm, allocator);
+        try repl(&vm);
     }
 }
