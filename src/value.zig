@@ -1,10 +1,13 @@
 const std = @import("std");
 
 const zlox_object = @import("object.zig");
+const zlox_vm = @import("vm.zig");
 
 const Obj = zlox_object.Obj;
 const ObjType = zlox_object.ObjType;
 const String = zlox_object.Obj.String;
+
+const VM = zlox_vm.VM;
 
 pub const ValueArray = std.ArrayList(Value);
 
@@ -44,12 +47,8 @@ pub const Value = union(enum) {
         return switch (a) {
             .boolean => a.boolean == b.boolean,
             .number => a.number == b.number,
-            .obj => {
-                const aStr = a.obj.asString();
-                const bStr = b.obj.asString();
-
-                return std.mem.eql(u8, aStr.chars, bStr.chars);
-            },
+            // Pointer comparison because strings are interned
+            .obj => a.obj == b.obj,
             .nil => true,
         };
     }
@@ -70,17 +69,17 @@ pub const Value = union(enum) {
         }
     }
 
-    fn concatenate(allocator: std.mem.Allocator, a: *String, b: *String) !Value {
+    fn concatenate(vm: *VM, a: *String, b: *String) !Value {
         const len = a.chars.len + b.chars.len;
-        const chars = try allocator.alloc(u8, len);
+        const chars = try vm.allocator.alloc(u8, len);
         @memcpy(chars[0..a.chars.len], a.chars);
         @memcpy(chars[a.chars.len..len], b.chars);
 
-        const str = try String.init(allocator, chars);
+        const str = try String.takeInit(vm, chars);
         return Value{ .obj = &str.obj };
     }
 
-    pub fn add(allocator: std.mem.Allocator, a: Value, b: Value) OperationError!Value {
+    pub fn add(vm: *VM, a: Value, b: Value) OperationError!Value {
         // Check if both numeric or both string
         Value.check_numeric(a, b) catch {
             Value.check_string(a, b) catch return OperationError.ExpectBothStringOrBothNumeric;
@@ -89,7 +88,7 @@ pub const Value = union(enum) {
         switch (a) {
             .number => return Value{ .number = a.number + b.number },
             .obj => return Value.concatenate(
-                allocator,
+                vm,
                 a.obj.asString(),
                 b.obj.asString(),
             ) catch {
@@ -99,27 +98,27 @@ pub const Value = union(enum) {
         }
     }
 
-    pub fn sub(_: std.mem.Allocator, a: Value, b: Value) OperationError!Value {
+    pub fn sub(_: *VM, a: Value, b: Value) OperationError!Value {
         try Value.check_numeric(a, b);
         return Value{ .number = a.number - b.number };
     }
 
-    pub fn mul(_: std.mem.Allocator, a: Value, b: Value) OperationError!Value {
+    pub fn mul(_: *VM, a: Value, b: Value) OperationError!Value {
         try Value.check_numeric(a, b);
         return Value{ .number = a.number * b.number };
     }
 
-    pub fn div(_: std.mem.Allocator, a: Value, b: Value) OperationError!Value {
+    pub fn div(_: *VM, a: Value, b: Value) OperationError!Value {
         try Value.check_numeric(a, b);
         return Value{ .number = a.number / b.number };
     }
 
-    pub fn less(_: std.mem.Allocator, a: Value, b: Value) OperationError!Value {
+    pub fn less(_: *VM, a: Value, b: Value) OperationError!Value {
         try Value.check_numeric(a, b);
         return Value{ .boolean = a.number < b.number };
     }
 
-    pub fn greater(_: std.mem.Allocator, a: Value, b: Value) OperationError!Value {
+    pub fn greater(_: *VM, a: Value, b: Value) OperationError!Value {
         try Value.check_numeric(a, b);
         return Value{ .boolean = a.number > b.number };
     }

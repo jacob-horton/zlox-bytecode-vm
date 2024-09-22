@@ -5,6 +5,7 @@ const zlox_common = @import("common.zig");
 const zlox_compiler = @import("compiler.zig");
 const zlox_debug = @import("debug.zig");
 const zlox_object = @import("object.zig");
+const zlox_table = @import("table.zig");
 const zlox_value = @import("value.zig");
 
 const Chunk = zlox_chunk.Chunk;
@@ -13,6 +14,8 @@ const OpCode = zlox_chunk.OpCode;
 const Compiler = zlox_compiler.Compiler;
 
 const Obj = zlox_object.Obj;
+
+const Table = zlox_table.Table;
 
 const Value = zlox_value.Value;
 const OperationError = zlox_value.OperationError;
@@ -39,7 +42,8 @@ pub const VM = struct {
     stack: [STACK_MAX]Value,
     stack_top: usize,
 
-    compiler: Compiler,
+    strings: Table,
+
     allocator: std.mem.Allocator,
 
     pub fn init(allocator: std.mem.Allocator) VM {
@@ -53,7 +57,8 @@ pub const VM = struct {
             // We define specific stack slots as we get to them, so undefined is fine
             .stack = undefined,
             .stack_top = 0,
-            .compiler = Compiler.init(allocator),
+
+            .strings = Table.init(allocator),
         };
     }
 
@@ -61,7 +66,7 @@ pub const VM = struct {
         var chunk = Chunk.init(self.allocator);
         defer chunk.deinit();
 
-        if (!(try self.compiler.compile(source, &chunk))) {
+        if (!(try Compiler.compile(self, source, &chunk))) {
             return .COMPILE_ERROR;
         }
 
@@ -118,10 +123,10 @@ pub const VM = struct {
         return self.chunk.constants.items[self.readByte()];
     }
 
-    fn binaryOp(self: *VM, op: fn (allocator: std.mem.Allocator, a: Value, b: Value) OperationError!Value) RuntimeError!void {
+    fn binaryOp(self: *VM, op: fn (vm: *VM, a: Value, b: Value) OperationError!Value) RuntimeError!void {
         const b = self.pop();
         const a = self.pop();
-        self.push(op(self.allocator, a, b) catch |err| switch (err) {
+        self.push(op(self, a, b) catch |err| switch (err) {
             OperationError.ExpectBothNumeric => return RuntimeError.ExpectBothOperandsNumeric,
             OperationError.ExpectBothString => return RuntimeError.ExpectBothOperandsString,
             OperationError.ExpectBothStringOrBothNumeric => return RuntimeError.ExpectBothOperandsStringOrBothNumeric,

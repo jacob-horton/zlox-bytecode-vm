@@ -6,6 +6,7 @@ const zlox_debug = @import("debug.zig");
 const zlox_object = @import("object.zig");
 const zlox_scanner = @import("scanner.zig");
 const zlox_value = @import("value.zig");
+const zlox_vm = @import("vm.zig");
 
 const Chunk = zlox_chunk.Chunk;
 const OpCode = zlox_chunk.OpCode;
@@ -18,12 +19,7 @@ const TokenType = zlox_scanner.TokenType;
 
 const Value = zlox_value.Value;
 
-const Parser = struct {
-    current: Token,
-    previous: Token,
-    had_error: bool,
-    panic_mode: bool,
-};
+const VM = zlox_vm.VM;
 
 // Implicitly assigns integers ascendingly, so goes from lowest to highest precedence
 const Precedence = enum {
@@ -40,7 +36,7 @@ const Precedence = enum {
     PRIMARY,
 };
 
-const ParseFn = *const fn (self: *Compiler) anyerror!void;
+const ParseFn = *const fn (self: *Parser) anyerror!void;
 const ParseRule = struct {
     prefix: ?ParseFn = null,
     infix: ?ParseFn = null,
@@ -53,23 +49,23 @@ const rules = blk: {
     // Rules for each token type. Default is { .infix = null, .prefix = null, .precedence = .NONE }
     var _rules = [_]ParseRule{ParseRule{}} ** num_token_types;
 
-    _rules[@intFromEnum(TokenType.LEFT_PAREN)] = ParseRule{ .prefix = Compiler.grouping };
-    _rules[@intFromEnum(TokenType.BANG)] = ParseRule{ .prefix = &Compiler.unary };
-    _rules[@intFromEnum(TokenType.BANG_EQUAL)] = ParseRule{ .infix = &Compiler.binary, .precedence = .EQUALITY };
-    _rules[@intFromEnum(TokenType.EQUAL_EQUAL)] = ParseRule{ .infix = &Compiler.binary, .precedence = .EQUALITY };
-    _rules[@intFromEnum(TokenType.GREATER)] = ParseRule{ .infix = &Compiler.binary, .precedence = .COMPARISON };
-    _rules[@intFromEnum(TokenType.GREATER_EQUAL)] = ParseRule{ .infix = &Compiler.binary, .precedence = .COMPARISON };
-    _rules[@intFromEnum(TokenType.LESS)] = ParseRule{ .infix = &Compiler.binary, .precedence = .COMPARISON };
-    _rules[@intFromEnum(TokenType.LESS_EQUAL)] = ParseRule{ .infix = &Compiler.binary, .precedence = .COMPARISON };
-    _rules[@intFromEnum(TokenType.MINUS)] = ParseRule{ .prefix = &Compiler.unary, .infix = Compiler.binary, .precedence = .TERM };
-    _rules[@intFromEnum(TokenType.PLUS)] = ParseRule{ .infix = Compiler.binary, .precedence = .TERM };
-    _rules[@intFromEnum(TokenType.SLASH)] = ParseRule{ .infix = Compiler.binary, .precedence = .FACTOR };
-    _rules[@intFromEnum(TokenType.STAR)] = ParseRule{ .infix = Compiler.binary, .precedence = .FACTOR };
-    _rules[@intFromEnum(TokenType.STRING)] = ParseRule{ .prefix = Compiler.string };
-    _rules[@intFromEnum(TokenType.NUMBER)] = ParseRule{ .prefix = Compiler.number };
-    _rules[@intFromEnum(TokenType.FALSE)] = ParseRule{ .prefix = Compiler.literal };
-    _rules[@intFromEnum(TokenType.TRUE)] = ParseRule{ .prefix = Compiler.literal };
-    _rules[@intFromEnum(TokenType.NIL)] = ParseRule{ .prefix = Compiler.literal };
+    _rules[@intFromEnum(TokenType.LEFT_PAREN)] = ParseRule{ .prefix = Parser.grouping };
+    _rules[@intFromEnum(TokenType.BANG)] = ParseRule{ .prefix = &Parser.unary };
+    _rules[@intFromEnum(TokenType.BANG_EQUAL)] = ParseRule{ .infix = &Parser.binary, .precedence = .EQUALITY };
+    _rules[@intFromEnum(TokenType.EQUAL_EQUAL)] = ParseRule{ .infix = &Parser.binary, .precedence = .EQUALITY };
+    _rules[@intFromEnum(TokenType.GREATER)] = ParseRule{ .infix = &Parser.binary, .precedence = .COMPARISON };
+    _rules[@intFromEnum(TokenType.GREATER_EQUAL)] = ParseRule{ .infix = &Parser.binary, .precedence = .COMPARISON };
+    _rules[@intFromEnum(TokenType.LESS)] = ParseRule{ .infix = &Parser.binary, .precedence = .COMPARISON };
+    _rules[@intFromEnum(TokenType.LESS_EQUAL)] = ParseRule{ .infix = &Parser.binary, .precedence = .COMPARISON };
+    _rules[@intFromEnum(TokenType.MINUS)] = ParseRule{ .prefix = &Parser.unary, .infix = Parser.binary, .precedence = .TERM };
+    _rules[@intFromEnum(TokenType.PLUS)] = ParseRule{ .infix = Parser.binary, .precedence = .TERM };
+    _rules[@intFromEnum(TokenType.SLASH)] = ParseRule{ .infix = Parser.binary, .precedence = .FACTOR };
+    _rules[@intFromEnum(TokenType.STAR)] = ParseRule{ .infix = Parser.binary, .precedence = .FACTOR };
+    _rules[@intFromEnum(TokenType.STRING)] = ParseRule{ .prefix = Parser.string };
+    _rules[@intFromEnum(TokenType.NUMBER)] = ParseRule{ .prefix = Parser.number };
+    _rules[@intFromEnum(TokenType.FALSE)] = ParseRule{ .prefix = Parser.literal };
+    _rules[@intFromEnum(TokenType.TRUE)] = ParseRule{ .prefix = Parser.literal };
+    _rules[@intFromEnum(TokenType.NIL)] = ParseRule{ .prefix = Parser.literal };
 
     break :blk _rules;
 };
@@ -79,65 +75,75 @@ fn getRule(typ: TokenType) *const ParseRule {
 }
 
 pub const Compiler = struct {
-    parser: Parser,
-    scanner: Scanner,
     compiling_chunk: *Chunk,
-    allocator: std.mem.Allocator,
 
-    pub fn init(allocator: std.mem.Allocator) Compiler {
-        return Compiler{
-            .allocator = allocator,
-            .parser = Parser{
-                .had_error = false,
-                .panic_mode = false,
-                // These will get set up when we `advance()` which is kicked off in `compile()` before doing anything
-                .previous = undefined,
-                .current = undefined,
-            },
-            // These will get set up when we `compile()` i.e. before doing anything
-            .scanner = undefined,
-            .compiling_chunk = undefined,
+    pub fn compile(vm: *VM, source: []u8, chunk: *Chunk) !bool {
+        var compiler = Compiler{ .compiling_chunk = chunk };
+        var scanner = Scanner.init(source);
+        var parser = Parser.init(vm, &compiler, &scanner);
+        try parser.parse();
+
+        return !parser.had_error;
+    }
+};
+
+const Parser = struct {
+    current: Token,
+    previous: Token,
+    had_error: bool,
+    panic_mode: bool,
+
+    scanner: *Scanner,
+    compiler: *Compiler,
+    vm: *VM,
+
+    pub fn init(vm: *VM, compiler: *Compiler, scanner: *Scanner) Parser {
+        var parser = Parser{
+            .had_error = false,
+            .panic_mode = false,
+
+            // These will get set up when we `advance()`
+            .previous = undefined,
+            .current = undefined,
+
+            .vm = vm,
+            .scanner = scanner,
+            .compiler = compiler,
         };
+
+        parser.advance();
+        return parser;
     }
 
-    pub fn compile(self: *Compiler, source: []u8, chunk: *Chunk) !bool {
-        self.scanner = Scanner.init(source);
-        self.compiling_chunk = chunk;
-
-        self.parser.had_error = false;
-        self.parser.panic_mode = false;
-
-        self.advance();
+    pub fn parse(self: *Parser) !void {
         try self.expression();
         self.consume(.EOF, "Expect end of expression.");
 
         try self.end();
-
-        return !self.parser.had_error;
     }
 
-    fn expression(self: *Compiler) !void {
+    fn expression(self: *Parser) !void {
         try self.parsePrecedence(.ASSIGNMENT);
     }
 
-    fn grouping(self: *Compiler) !void {
+    fn grouping(self: *Parser) !void {
         try self.expression();
         self.consume(.RIGHT_PAREN, "Expect ')' after expression");
     }
 
-    fn number(self: *Compiler) !void {
-        const token = self.parser.previous;
+    fn number(self: *Parser) !void {
+        const token = self.previous;
         const value = try std.fmt.parseFloat(f64, token.start[0..token.length]);
         try self.emitConstant(Value{ .number = value });
     }
 
-    fn string(self: *Compiler) !void {
-        const str = try String.copyInit(self.allocator, self.parser.previous.start + 1, self.parser.previous.length - 2);
+    fn string(self: *Parser) !void {
+        const str = try String.copyInit(self.vm, self.previous.start + 1, self.previous.length - 2);
         try self.emitConstant(Value{ .obj = &str.obj });
     }
 
-    fn unary(self: *Compiler) !void {
-        const op_type = self.parser.previous.type;
+    fn unary(self: *Parser) !void {
+        const op_type = self.previous.type;
 
         // Compile the operand
         try self.parsePrecedence(.UNARY);
@@ -150,8 +156,8 @@ pub const Compiler = struct {
         }
     }
 
-    fn binary(self: *Compiler) !void {
-        const op_type = self.parser.previous.type;
+    fn binary(self: *Parser) !void {
+        const op_type = self.previous.type;
         const rule = getRule(op_type);
 
         // +1 to make it left associative
@@ -172,8 +178,8 @@ pub const Compiler = struct {
         }
     }
 
-    fn literal(self: *Compiler) !void {
-        switch (self.parser.previous.type) {
+    fn literal(self: *Parser) !void {
+        switch (self.previous.type) {
             .FALSE => try self.emitByte(@intFromEnum(OpCode.FALSE)),
             .TRUE => try self.emitByte(@intFromEnum(OpCode.TRUE)),
             .NIL => try self.emitByte(@intFromEnum(OpCode.NIL)),
@@ -181,9 +187,9 @@ pub const Compiler = struct {
         }
     }
 
-    fn parsePrecedence(self: *Compiler, precedence: Precedence) !void {
+    fn parsePrecedence(self: *Parser, precedence: Precedence) !void {
         self.advance();
-        const rule = getRule(self.parser.previous.type);
+        const rule = getRule(self.previous.type);
         if (rule.*.prefix) |prefix_rule| {
             try prefix_rule(self);
         } else {
@@ -191,20 +197,20 @@ pub const Compiler = struct {
             return;
         }
 
-        while (@intFromEnum(precedence) <= @intFromEnum(getRule(self.parser.current.type).precedence)) {
+        while (@intFromEnum(precedence) <= @intFromEnum(getRule(self.current.type).precedence)) {
             self.advance();
             // TODO: handle null infix?
-            const infix_rule = getRule(self.parser.previous.type).infix.?;
+            const infix_rule = getRule(self.previous.type).infix.?;
             try infix_rule(self);
         }
     }
 
-    fn advance(self: *Compiler) void {
-        self.parser.previous = self.parser.current;
+    fn advance(self: *Parser) void {
+        self.previous = self.current;
 
         while (true) {
-            self.parser.current = self.scanner.scanToken();
-            const current_token = self.parser.current;
+            self.current = self.scanner.scanToken();
+            const current_token = self.current;
 
             if (current_token.type != .ERROR) break;
 
@@ -212,8 +218,8 @@ pub const Compiler = struct {
         }
     }
 
-    fn consume(self: *Compiler, typ: TokenType, message: []const u8) void {
-        if (self.parser.current.type == typ) {
+    fn consume(self: *Parser, typ: TokenType, message: []const u8) void {
+        if (self.current.type == typ) {
             self.advance();
             return;
         }
@@ -221,36 +227,36 @@ pub const Compiler = struct {
         self.errAtCurrent(message);
     }
 
-    fn end(self: *Compiler) !void {
+    fn end(self: *Parser) !void {
         try self.emitReturn();
 
-        if (zlox_common.DEBUG_PRINT_CODE and self.parser.had_error) {
+        if (zlox_common.DEBUG_PRINT_CODE and self.had_error) {
             zlox_debug.dissassembleChunk(self.currentChunk(), "code");
         }
     }
 
-    fn emitConstant(self: *Compiler, value: Value) !void {
+    fn emitConstant(self: *Parser, value: Value) !void {
         try self.emitBytes(@intFromEnum(OpCode.CONSTANT), try self.makeConstant(value));
     }
 
-    fn emitReturn(self: *Compiler) !void {
+    fn emitReturn(self: *Parser) !void {
         try self.emitByte(@intFromEnum(OpCode.RETURN));
     }
 
-    fn currentChunk(self: *Compiler) *Chunk {
-        return self.compiling_chunk;
+    fn currentChunk(self: *Parser) *Chunk {
+        return self.compiler.compiling_chunk;
     }
 
-    fn emitBytes(self: *Compiler, byte1: u8, byte2: u8) !void {
+    fn emitBytes(self: *Parser, byte1: u8, byte2: u8) !void {
         try self.emitByte(byte1);
         try self.emitByte(byte2);
     }
 
-    fn emitByte(self: *Compiler, byte: u8) !void {
-        try self.currentChunk().write(byte, self.parser.previous.line);
+    fn emitByte(self: *Parser, byte: u8) !void {
+        try self.currentChunk().write(byte, self.previous.line);
     }
 
-    fn makeConstant(self: *Compiler, value: Value) !u8 {
+    fn makeConstant(self: *Parser, value: Value) !u8 {
         const constant = try self.currentChunk().addConstant(value);
         if (constant > std.math.maxInt(u8)) {
             self.err("Too many constants in one chunk.");
@@ -260,17 +266,17 @@ pub const Compiler = struct {
         return @intCast(constant);
     }
 
-    fn errAtCurrent(self: *Compiler, message: []const u8) void {
-        self.errAt(&self.parser.previous, message);
+    fn errAtCurrent(self: *Parser, message: []const u8) void {
+        self.errAt(&self.previous, message);
     }
 
-    fn err(self: *Compiler, message: []const u8) void {
-        self.errAt(&self.parser.previous, message);
+    fn err(self: *Parser, message: []const u8) void {
+        self.errAt(&self.previous, message);
     }
 
-    fn errAt(self: *Compiler, token: *Token, message: []const u8) void {
-        if (self.parser.panic_mode) return;
-        self.parser.panic_mode = true;
+    fn errAt(self: *Parser, token: *Token, message: []const u8) void {
+        if (self.panic_mode) return;
+        self.panic_mode = true;
 
         std.debug.print("[line {d}] Error", .{token.*.line});
 
@@ -281,6 +287,6 @@ pub const Compiler = struct {
         }
 
         std.debug.print(" {s}\n", .{message});
-        self.parser.had_error = true;
+        self.had_error = true;
     }
 };
