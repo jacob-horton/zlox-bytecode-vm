@@ -76,14 +76,58 @@ fn getRule(typ: TokenType) *const ParseRule {
 
 pub const Compiler = struct {
     compiling_chunk: *Chunk,
+    parser: *Parser,
 
     pub fn compile(vm: *VM, source: []u8, chunk: *Chunk) !bool {
-        var compiler = Compiler{ .compiling_chunk = chunk };
+        var compiler = Compiler{ .compiling_chunk = chunk, .parser = undefined };
+
         var scanner = Scanner.init(source);
         var parser = Parser.init(vm, &compiler, &scanner);
+        compiler.parser = &parser;
+
         try parser.parse();
+        try compiler.end();
 
         return !parser.had_error;
+    }
+
+    fn end(self: *Compiler) !void {
+        try self.emitReturn();
+
+        if (zlox_common.DEBUG_PRINT_CODE and self.parser.had_error) {
+            zlox_debug.dissassembleChunk(self.currentChunk(), "code");
+        }
+    }
+
+    fn emitConstant(self: *Compiler, value: Value) !void {
+        try self.emitBytes(@intFromEnum(OpCode.CONSTANT), try self.makeConstant(value));
+    }
+
+    fn emitReturn(self: *Compiler) !void {
+        try self.emitByte(@intFromEnum(OpCode.RETURN));
+    }
+
+    fn currentChunk(self: *Compiler) *Chunk {
+        return self.compiling_chunk;
+    }
+
+    fn emitBytes(self: *Compiler, byte1: u8, byte2: u8) !void {
+        try self.emitByte(byte1);
+        try self.emitByte(byte2);
+    }
+
+    fn emitByte(self: *Compiler, byte: u8) !void {
+        try self.currentChunk().write(byte, self.parser.previous.line);
+    }
+
+    fn makeConstant(self: *Compiler, value: Value) !u8 {
+        const constant = try self.currentChunk().addConstant(value);
+        if (constant > std.math.maxInt(u8)) {
+            self.parser.err("Too many constants in one chunk.");
+            return 0;
+        }
+
+        return @intCast(constant);
     }
 };
 
@@ -118,8 +162,6 @@ const Parser = struct {
     pub fn parse(self: *Parser) !void {
         try self.expression();
         self.consume(.EOF, "Expect end of expression.");
-
-        try self.end();
     }
 
     fn expression(self: *Parser) !void {
@@ -134,12 +176,12 @@ const Parser = struct {
     fn number(self: *Parser) !void {
         const token = self.previous;
         const value = try std.fmt.parseFloat(f64, token.start[0..token.length]);
-        try self.emitConstant(Value{ .number = value });
+        try self.compiler.emitConstant(Value{ .number = value });
     }
 
     fn string(self: *Parser) !void {
         const str = try String.copyInit(self.vm, self.previous.start + 1, self.previous.length - 2);
-        try self.emitConstant(Value{ .obj = &str.obj });
+        try self.compiler.emitConstant(Value{ .obj = &str.obj });
     }
 
     fn unary(self: *Parser) !void {
@@ -150,8 +192,8 @@ const Parser = struct {
 
         // Emit the op instruction
         switch (op_type) {
-            .MINUS => try self.emitByte(@intFromEnum(OpCode.NEGATE)),
-            .BANG => try self.emitByte(@intFromEnum(OpCode.NOT)),
+            .MINUS => try self.compiler.emitByte(@intFromEnum(OpCode.NEGATE)),
+            .BANG => try self.compiler.emitByte(@intFromEnum(OpCode.NOT)),
             else => unreachable,
         }
     }
@@ -164,25 +206,25 @@ const Parser = struct {
         try self.parsePrecedence(@enumFromInt(@intFromEnum(rule.precedence) + 1));
 
         switch (op_type) {
-            .BANG_EQUAL => try self.emitBytes(@intFromEnum(OpCode.EQUAL), @intFromEnum(OpCode.NOT)),
-            .EQUAL_EQUAL => try self.emitByte(@intFromEnum(OpCode.EQUAL)),
-            .GREATER => try self.emitByte(@intFromEnum(OpCode.GREATER)),
-            .GREATER_EQUAL => try self.emitBytes(@intFromEnum(OpCode.LESS), @intFromEnum(OpCode.NOT)),
-            .LESS => try self.emitByte(@intFromEnum(OpCode.LESS)),
-            .LESS_EQUAL => try self.emitBytes(@intFromEnum(OpCode.GREATER), @intFromEnum(OpCode.NOT)),
-            .PLUS => try self.emitByte(@intFromEnum(OpCode.ADD)),
-            .MINUS => try self.emitByte(@intFromEnum(OpCode.SUBTRACT)),
-            .STAR => try self.emitByte(@intFromEnum(OpCode.MULTIPLY)),
-            .SLASH => try self.emitByte(@intFromEnum(OpCode.DIVIDE)),
+            .BANG_EQUAL => try self.compiler.emitBytes(@intFromEnum(OpCode.EQUAL), @intFromEnum(OpCode.NOT)),
+            .EQUAL_EQUAL => try self.compiler.emitByte(@intFromEnum(OpCode.EQUAL)),
+            .GREATER => try self.compiler.emitByte(@intFromEnum(OpCode.GREATER)),
+            .GREATER_EQUAL => try self.compiler.emitBytes(@intFromEnum(OpCode.LESS), @intFromEnum(OpCode.NOT)),
+            .LESS => try self.compiler.emitByte(@intFromEnum(OpCode.LESS)),
+            .LESS_EQUAL => try self.compiler.emitBytes(@intFromEnum(OpCode.GREATER), @intFromEnum(OpCode.NOT)),
+            .PLUS => try self.compiler.emitByte(@intFromEnum(OpCode.ADD)),
+            .MINUS => try self.compiler.emitByte(@intFromEnum(OpCode.SUBTRACT)),
+            .STAR => try self.compiler.emitByte(@intFromEnum(OpCode.MULTIPLY)),
+            .SLASH => try self.compiler.emitByte(@intFromEnum(OpCode.DIVIDE)),
             else => unreachable,
         }
     }
 
     fn literal(self: *Parser) !void {
         switch (self.previous.type) {
-            .FALSE => try self.emitByte(@intFromEnum(OpCode.FALSE)),
-            .TRUE => try self.emitByte(@intFromEnum(OpCode.TRUE)),
-            .NIL => try self.emitByte(@intFromEnum(OpCode.NIL)),
+            .FALSE => try self.compiler.emitByte(@intFromEnum(OpCode.FALSE)),
+            .TRUE => try self.compiler.emitByte(@intFromEnum(OpCode.TRUE)),
+            .NIL => try self.compiler.emitByte(@intFromEnum(OpCode.NIL)),
             else => unreachable,
         }
     }
@@ -225,45 +267,6 @@ const Parser = struct {
         }
 
         self.errAtCurrent(message);
-    }
-
-    fn end(self: *Parser) !void {
-        try self.emitReturn();
-
-        if (zlox_common.DEBUG_PRINT_CODE and self.had_error) {
-            zlox_debug.dissassembleChunk(self.currentChunk(), "code");
-        }
-    }
-
-    fn emitConstant(self: *Parser, value: Value) !void {
-        try self.emitBytes(@intFromEnum(OpCode.CONSTANT), try self.makeConstant(value));
-    }
-
-    fn emitReturn(self: *Parser) !void {
-        try self.emitByte(@intFromEnum(OpCode.RETURN));
-    }
-
-    fn currentChunk(self: *Parser) *Chunk {
-        return self.compiler.compiling_chunk;
-    }
-
-    fn emitBytes(self: *Parser, byte1: u8, byte2: u8) !void {
-        try self.emitByte(byte1);
-        try self.emitByte(byte2);
-    }
-
-    fn emitByte(self: *Parser, byte: u8) !void {
-        try self.currentChunk().write(byte, self.previous.line);
-    }
-
-    fn makeConstant(self: *Parser, value: Value) !u8 {
-        const constant = try self.currentChunk().addConstant(value);
-        if (constant > std.math.maxInt(u8)) {
-            self.err("Too many constants in one chunk.");
-            return 0;
-        }
-
-        return @intCast(constant);
     }
 
     fn errAtCurrent(self: *Parser, message: []const u8) void {
