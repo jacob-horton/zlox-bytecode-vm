@@ -30,6 +30,7 @@ pub const Table = struct {
         }
     }
 
+    /// Returns `true` if it's a new key
     pub fn set(self: *Table, key: *String, value: Value) !bool {
         if (@as(f32, @floatFromInt(self.count + 1)) > @as(f32, @floatFromInt(self.capacity)) * MAX_LOAD) {
             try self.growCapacity();
@@ -45,6 +46,9 @@ pub const Table = struct {
         return is_new_key;
     }
 
+    /// Returns `null` if there are no entries
+    /// If the key is found, it will return the entry associated with it
+    /// Otherwise, it will return a pointer to the bucket that key would exist in
     fn findEntry(self: *Table, key: *String) ?*Entry {
         if (self.entries == null) return null;
 
@@ -111,6 +115,8 @@ pub const Table = struct {
         }
     }
 
+    /// Will fill `value` with the value associated with `key`
+    /// Returns true if the item was found
     pub fn get(self: *Table, key: *String, value: *Value) bool {
         const entry = self.findEntry(key);
         if (entry == null or entry.?.key == null) {
@@ -121,6 +127,7 @@ pub const Table = struct {
         return true;
     }
 
+    /// Returns true if the item was found
     pub fn delete(self: *Table, key: *String) bool {
         const entry = self.findEntry(key);
         if (entry == null or entry.?.key == null) {
