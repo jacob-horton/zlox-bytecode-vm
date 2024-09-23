@@ -31,6 +31,11 @@ pub fn disassembleInstruction(chunk: *Chunk, offset: usize, prev_offset: usize) 
         @intFromEnum(OpCode.FALSE) => return simpleInstruction(instruction, offset),
         @intFromEnum(OpCode.NEGATE) => return simpleInstruction(instruction, offset),
         @intFromEnum(OpCode.PRINT) => return simpleInstruction(instruction, offset),
+        @intFromEnum(OpCode.JUMP) => return jumpInstruction(instruction, 1, chunk, offset),
+        @intFromEnum(OpCode.JUMP_IF_FALSE) => return jumpInstruction(instruction, 1, chunk, offset),
+        @intFromEnum(OpCode.LOOP) => return jumpInstruction(instruction, -1, chunk, offset),
+        @intFromEnum(OpCode.SET_LOCAL) => return byteInstruction(instruction, chunk, offset),
+        @intFromEnum(OpCode.GET_LOCAL) => return byteInstruction(instruction, chunk, offset),
         @intFromEnum(OpCode.SET_GLOBAL) => return constantInstruction(instruction, chunk, offset),
         @intFromEnum(OpCode.GET_GLOBAL) => return constantInstruction(instruction, chunk, offset),
         @intFromEnum(OpCode.DEFINE_GLOBAL) => return simpleInstruction(instruction, offset),
@@ -63,6 +68,25 @@ fn constantInstruction(instruction: u8, chunk: *Chunk, offset: usize) usize {
     std.debug.print("'\n", .{});
 
     return offset + 2;
+}
+
+fn byteInstruction(instruction: u8, chunk: *Chunk, offset: usize) usize {
+    const slot = chunk.code.items[offset + 1];
+    std.debug.print("{s:<16} {d:4}\n", .{ getInstructionName(instruction), slot });
+
+    return offset + 2;
+}
+
+fn jumpInstruction(instruction: u8, sign: i2, chunk: *Chunk, offset: usize) usize {
+    var jump = @as(i17, chunk.code.items[offset + 1]) << 8;
+    jump |= chunk.code.items[offset + 2];
+
+    // Add 3 for 1 byte jump + 2 byte operand
+    const jump_signed = sign * jump;
+    const jump_location = @as(i65, offset) + 3 + jump_signed; // NOTE: this only makes sense for 64 bit architectures - any more will fail
+    std.debug.print("{s:<16} {d:4} -> {d}\n", .{ getInstructionName(instruction), offset, jump_location });
+
+    return offset + 3;
 }
 
 fn simpleInstruction(instruction: u8, offset: usize) usize {

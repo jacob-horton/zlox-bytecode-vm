@@ -74,7 +74,9 @@ pub const VM = struct {
         var chunk = Chunk.init(self.allocator);
         defer chunk.deinit();
 
-        if (!(try Compiler.compile(self, source, &chunk))) {
+        var compiler = Compiler.init();
+
+        if (!(try compiler.compile(self, source, &chunk))) {
             return .COMPILE_ERROR;
         }
 
@@ -126,10 +128,16 @@ pub const VM = struct {
         return self.runtimeError("{s}", .{message});
     }
 
-    inline fn readByte(self: *VM) u8 {
+    fn readByte(self: *VM) u8 {
         const byte = self.ip[0];
         self.ip += 1;
         return byte;
+    }
+
+    /// Reads 2 bytes as a u16
+    fn readShort(self: *VM) u16 {
+        self.ip += 2;
+        return (@as(u16, (self.ip - 2)[0]) << 8) | (self.ip - 1)[0];
     }
 
     fn readConstant(self: *VM) Value {
@@ -180,6 +188,14 @@ pub const VM = struct {
                 @intFromEnum(OpCode.TRUE) => self.push(Value{ .boolean = true }),
                 @intFromEnum(OpCode.FALSE) => self.push(Value{ .boolean = false }),
                 @intFromEnum(OpCode.POP) => _ = self.pop(),
+                @intFromEnum(OpCode.SET_LOCAL) => {
+                    const slot = self.readByte();
+                    self.stack[slot] = self.peek(0).*;
+                },
+                @intFromEnum(OpCode.GET_LOCAL) => {
+                    const slot = self.readByte();
+                    self.push(self.stack[slot]);
+                },
                 @intFromEnum(OpCode.SET_GLOBAL) => {
                     const name = self.readString();
                     if (try self.globals.set(name, self.peek(0).*)) {
@@ -222,6 +238,18 @@ pub const VM = struct {
                 @intFromEnum(OpCode.PRINT) => {
                     self.pop().print();
                     std.debug.print("\n", .{});
+                },
+                @intFromEnum(OpCode.JUMP) => {
+                    const offset = self.readShort();
+                    self.ip += offset;
+                },
+                @intFromEnum(OpCode.JUMP_IF_FALSE) => {
+                    const offset = self.readShort();
+                    if (self.peek(0).isFalsey()) self.ip += offset;
+                },
+                @intFromEnum(OpCode.LOOP) => {
+                    const offset = self.readShort();
+                    self.ip -= offset;
                 },
                 @intFromEnum(OpCode.RETURN) => {
                     // Exit interpreter

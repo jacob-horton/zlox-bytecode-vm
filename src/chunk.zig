@@ -13,6 +13,8 @@ pub const OpCode = enum(u8) {
     POP,
     SET_GLOBAL,
     GET_GLOBAL,
+    SET_LOCAL,
+    GET_LOCAL,
     DEFINE_GLOBAL,
     EQUAL,
     GREATER,
@@ -24,6 +26,9 @@ pub const OpCode = enum(u8) {
     NOT,
     NEGATE,
     PRINT,
+    JUMP,
+    JUMP_IF_FALSE,
+    LOOP,
     RETURN,
 };
 
