@@ -189,6 +189,7 @@ pub const Scanner = struct {
         return @intFromPtr(self.current) >= @intFromPtr(self.end);
     }
 
+    // TODO: token constructor
     fn makeToken(self: *Scanner, typ: TokenType) Token {
         return Token{
             .type = typ,

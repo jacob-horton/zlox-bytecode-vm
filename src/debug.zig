@@ -5,7 +5,9 @@ const zlox_chunk = @import("chunk.zig");
 const Chunk = zlox_chunk.Chunk;
 const OpCode = zlox_chunk.OpCode;
 
-pub fn dissassembleChunk(chunk: *Chunk) void {
+pub fn disassembleChunk(chunk: *Chunk, name: []const u8) void {
+    std.debug.print("== {s} ==\n", .{name});
+
     var offset: usize = 0;
     var prev_offset: usize = 0;
     while (offset < chunk.code.items.len) {

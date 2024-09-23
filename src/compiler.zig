@@ -12,6 +12,7 @@ const Chunk = zlox_chunk.Chunk;
 const OpCode = zlox_chunk.OpCode;
 
 const String = zlox_object.Obj.String;
+const Function = zlox_object.Obj.Function;
 
 const Scanner = zlox_scanner.Scanner;
 const Token = zlox_scanner.Token;
@@ -20,6 +21,11 @@ const TokenType = zlox_scanner.TokenType;
 const Value = zlox_value.Value;
 
 const VM = zlox_vm.VM;
+
+pub const FunctionType = enum {
+    FUNCTION,
+    SCRIPT,
+};
 
 // Implicitly assigns integers ascendingly, so goes from lowest to highest precedence
 const Precedence = enum {
@@ -77,34 +83,69 @@ fn getRule(typ: TokenType) *const ParseRule {
     return &rules[@intFromEnum(typ)];
 }
 
-const U8_COUNT: u9 = std.math.maxInt(u8) + 1;
-
 pub const Local = struct {
     name: Token,
     depth: ?usize,
 };
 
 pub const Compiler = struct {
-    locals: [U8_COUNT]Local,
+    function: *Function,
+    type: FunctionType,
+
+    locals: [zlox_common.U8_COUNT]Local,
     local_count: usize,
     scope_depth: usize,
 
-    pub fn init() Compiler {
-        return Compiler{
+    vm: *VM,
+    parser: Parser,
+
+    pub fn init(vm: *VM, typ: FunctionType) !Compiler {
+        var compiler = Compiler{
             .local_count = 0,
             .scope_depth = 0,
             .locals = undefined,
+
+            .function = undefined,
+            .type = typ,
+
+            .vm = vm,
+
+            // Set up when calling `compile()`
+            .parser = undefined,
         };
+
+        compiler.function = try Function.init(vm);
+
+        const local = &compiler.locals[compiler.local_count];
+        compiler.local_count += 1;
+
+        local.depth = 0;
+        local.name.start = "";
+        local.name.length = 0;
+
+        return compiler;
     }
 
-    pub fn compile(self: *Compiler, vm: *VM, source: []u8, chunk: *Chunk) !bool {
-        var scanner = Scanner.init(source);
-        var parser = Parser.init(vm, self, &scanner, chunk);
+    // TODO: errors instead of optionals
+    pub fn compile(self: *Compiler, source: []u8) !?*Function {
+        const scanner = Scanner.init(source);
+        self.parser = Parser.init(self.vm, self, scanner);
 
-        try parser.parse();
-        try parser.end();
+        try self.parser.parse();
 
-        return !parser.had_error;
+        const function = try self.end();
+        return if (self.parser.had_error) null else function;
+    }
+
+    pub fn end(self: *Compiler) !*Function {
+        try self.parser.end();
+
+        const function = self.function;
+        if (zlox_common.DEBUG_PRINT_CODE and self.parser.had_error) {
+            zlox_debug.disassembleChunk(self.parser.currentChunk(), if (self.function.name) |name| name.chars else "<script>");
+        }
+
+        return function;
     }
 };
 
@@ -114,13 +155,11 @@ const Parser = struct {
     had_error: bool,
     panic_mode: bool,
 
-    compiling_chunk: *Chunk,
-
-    scanner: *Scanner,
+    scanner: Scanner,
     current_compiler: *Compiler,
     vm: *VM,
 
-    pub fn init(vm: *VM, compiler: *Compiler, scanner: *Scanner, chunk: *Chunk) Parser {
+    pub fn init(vm: *VM, compiler: *Compiler, scanner: Scanner) Parser {
         var parser = Parser{
             .had_error = false,
             .panic_mode = false,
@@ -132,8 +171,6 @@ const Parser = struct {
             .vm = vm,
             .scanner = scanner,
             .current_compiler = compiler,
-
-            .compiling_chunk = chunk,
         };
 
         parser.advance();
@@ -246,7 +283,7 @@ const Parser = struct {
     }
 
     fn addLocal(self: *Parser, name: Token) void {
-        if (self.current_compiler.local_count >= U8_COUNT) {
+        if (self.current_compiler.local_count >= zlox_common.U8_COUNT) {
             self.err("Too many local variables in function.");
             return;
         }
@@ -610,7 +647,7 @@ const Parser = struct {
         }
 
         if (can_assign and self.match(.EQUAL)) {
-            // self.err("Invalid assignment target.");
+            self.err("Invalid assignment target.");
         }
     }
 
@@ -662,10 +699,6 @@ const Parser = struct {
 
     fn end(self: *Parser) !void {
         try self.emitReturn();
-
-        if (zlox_common.DEBUG_PRINT_CODE and self.had_error) {
-            zlox_debug.dissassembleChunk(self.currentChunk());
-        }
     }
 
     fn emitConstant(self: *Parser, value: Value) !void {
@@ -677,7 +710,7 @@ const Parser = struct {
     }
 
     fn currentChunk(self: *Parser) *Chunk {
-        return self.compiling_chunk;
+        return &self.current_compiler.function.chunk;
     }
 
     fn emitBytes(self: *Parser, byte1: u8, byte2: u8) !void {

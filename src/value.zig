@@ -89,8 +89,8 @@ pub const Value = union(enum) {
             .number => return Value{ .number = a.number + b.number },
             .obj => return Value.concatenate(
                 vm,
-                a.obj.asString(),
-                b.obj.asString(),
+                a.obj.as(String),
+                b.obj.as(String),
             ) catch {
                 return OperationError.ConcatenationError;
             },

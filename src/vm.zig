@@ -15,13 +15,16 @@ const Compiler = zlox_compiler.Compiler;
 
 const Obj = zlox_object.Obj;
 const String = zlox_object.Obj.String;
+const Function = zlox_object.Obj.Function;
 
 const Table = zlox_table.Table;
 
 const Value = zlox_value.Value;
 const OperationError = zlox_value.OperationError;
 
-const STACK_MAX = 256;
+// TODO: handle stack overflow if enough function calls use enough temporaries in addition to locals
+const FRAMES_MAX: usize = 64;
+const STACK_MAX: usize = FRAMES_MAX * zlox_common.U8_COUNT;
 
 pub const InterpretResult = enum {
     OK,
@@ -37,11 +40,38 @@ const RuntimeError = error{
     ConcatenationError,
 };
 
-pub const VM = struct {
-    chunk: *Chunk,
+const CallFrame = struct {
+    function: *Function,
     ip: [*]u8,
+    slots: [*]Value,
+
+    fn readByte(self: *CallFrame) u8 {
+        const byte = self.ip[0];
+        self.ip += 1;
+        return byte;
+    }
+
+    /// Reads 2 bytes as a u16
+    fn readShort(self: *CallFrame) u16 {
+        self.ip += 2;
+        return (@as(u16, (self.ip - 2)[0]) << 8) | (self.ip - 1)[0];
+    }
+
+    fn readConstant(self: *CallFrame) Value {
+        return self.function.chunk.constants.items[self.readByte()];
+    }
+
+    fn readString(self: *CallFrame) *String {
+        return self.readConstant().obj.as(String);
+    }
+};
+
+pub const VM = struct {
     stack: [STACK_MAX]Value,
     stack_top: usize,
+
+    frames: [FRAMES_MAX]CallFrame,
+    frame_count: usize,
 
     strings: Table,
     globals: Table,
@@ -52,9 +82,9 @@ pub const VM = struct {
         return VM{
             .allocator = allocator,
 
-            // These will get set up when calling `interpret()` before doing anything
-            .chunk = undefined,
-            .ip = undefined,
+            // This will get set up when calling `interpret()` before doing anything
+            .frames = undefined,
+            .frame_count = 0,
 
             // We define specific stack slots as we get to them, so undefined is fine
             .stack = undefined,
@@ -71,20 +101,23 @@ pub const VM = struct {
     }
 
     pub fn interpret(self: *VM, source: []u8) !InterpretResult {
-        var chunk = Chunk.init(self.allocator);
-        defer chunk.deinit();
+        var compiler = try Compiler.init(self, .SCRIPT);
 
-        var compiler = Compiler.init();
+        const result = compiler.compile(source) catch null;
+        if (result) |function| {
+            self.push(Value{ .obj = &function.obj });
 
-        if (!(try compiler.compile(self, source, &chunk))) {
+            var frame = &self.frames[self.frame_count];
+            self.frame_count += 1;
+
+            frame.function = function;
+            frame.ip = function.chunk.code.items.ptr;
+            frame.slots = &self.stack;
+
+            return try self.run();
+        } else {
             return .COMPILE_ERROR;
         }
-
-        self.chunk = &chunk;
-        self.ip = chunk.code.items.ptr;
-
-        const result = try self.run();
-        return result;
     }
 
     fn push(self: *VM, value: Value) void {
@@ -109,8 +142,9 @@ pub const VM = struct {
         std.debug.print(fmt, args);
         std.debug.print("\n", .{});
 
-        const instruction = zlox_common.ptrOffset(u8, self.chunk.code.items.ptr, self.ip);
-        std.debug.print("[line {d}] in script\n", .{self.chunk.getLine(instruction).?});
+        const frame = &self.frames[self.frame_count - 1];
+        const instruction = zlox_common.ptrOffset(u8, frame.function.chunk.code.items.ptr, frame.ip);
+        std.debug.print("[line {d}] in script\n", .{frame.function.chunk.getLine(instruction).?});
         self.resetStack();
 
         return .RUNTIME_ERROR;
@@ -128,26 +162,6 @@ pub const VM = struct {
         return self.runtimeError("{s}", .{message});
     }
 
-    fn readByte(self: *VM) u8 {
-        const byte = self.ip[0];
-        self.ip += 1;
-        return byte;
-    }
-
-    /// Reads 2 bytes as a u16
-    fn readShort(self: *VM) u16 {
-        self.ip += 2;
-        return (@as(u16, (self.ip - 2)[0]) << 8) | (self.ip - 1)[0];
-    }
-
-    fn readConstant(self: *VM) Value {
-        return self.chunk.constants.items[self.readByte()];
-    }
-
-    fn readString(self: *VM) *String {
-        return self.readConstant().obj.asString();
-    }
-
     fn binaryOp(self: *VM, op: fn (vm: *VM, a: Value, b: Value) OperationError!Value) RuntimeError!void {
         const b = self.pop();
         const a = self.pop();
@@ -160,6 +174,8 @@ pub const VM = struct {
     }
 
     fn run(self: *VM) !InterpretResult {
+        const frame = &self.frames[self.frame_count - 1];
+
         var prev_offset: usize = 0;
 
         while (true) {
@@ -173,15 +189,15 @@ pub const VM = struct {
 
                 std.debug.print("\n", .{});
 
-                const offset = zlox_common.ptrOffset(u8, self.chunk.code.items.ptr, self.ip);
-                _ = zlox_debug.disassembleInstruction(self.chunk, offset, prev_offset);
+                const offset = zlox_common.ptrOffset(u8, frame.function.chunk.code.items.ptr, frame.ip);
+                _ = zlox_debug.disassembleInstruction(&frame.function.chunk, offset, prev_offset);
                 prev_offset = offset;
             }
 
-            const instruction = self.readByte();
+            const instruction = frame.readByte();
             switch (instruction) {
                 @intFromEnum(OpCode.CONSTANT) => {
-                    const constant = self.readConstant();
+                    const constant = frame.readConstant();
                     self.push(constant);
                 },
                 @intFromEnum(OpCode.NIL) => self.push(.nil),
@@ -189,22 +205,22 @@ pub const VM = struct {
                 @intFromEnum(OpCode.FALSE) => self.push(Value{ .boolean = false }),
                 @intFromEnum(OpCode.POP) => _ = self.pop(),
                 @intFromEnum(OpCode.SET_LOCAL) => {
-                    const slot = self.readByte();
-                    self.stack[slot] = self.peek(0).*;
+                    const slot = frame.readByte();
+                    frame.slots[slot] = self.peek(0).*;
                 },
                 @intFromEnum(OpCode.GET_LOCAL) => {
-                    const slot = self.readByte();
-                    self.push(self.stack[slot]);
+                    const slot = frame.readByte();
+                    self.push(frame.slots[slot]);
                 },
                 @intFromEnum(OpCode.SET_GLOBAL) => {
-                    const name = self.readString();
+                    const name = frame.readString();
                     if (try self.globals.set(name, self.peek(0).*)) {
                         _ = self.globals.delete(name);
                         return self.runtimeError("Undefined variable '{s}'.", .{name.chars});
                     }
                 },
                 @intFromEnum(OpCode.GET_GLOBAL) => {
-                    const name = self.readString();
+                    const name = frame.readString();
                     var value: Value = undefined;
                     if (!self.globals.get(name, &value)) {
                         return self.runtimeError("Undefined variable '{s}'.", .{name.chars});
@@ -213,7 +229,7 @@ pub const VM = struct {
                     self.push(value);
                 },
                 @intFromEnum(OpCode.DEFINE_GLOBAL) => {
-                    const name = self.readString();
+                    const name = frame.readString();
                     _ = try self.globals.set(name, self.peek(0).*);
                     _ = self.pop();
                 },
@@ -240,16 +256,16 @@ pub const VM = struct {
                     std.debug.print("\n", .{});
                 },
                 @intFromEnum(OpCode.JUMP) => {
-                    const offset = self.readShort();
-                    self.ip += offset;
+                    const offset = frame.readShort();
+                    frame.ip += offset;
                 },
                 @intFromEnum(OpCode.JUMP_IF_FALSE) => {
-                    const offset = self.readShort();
-                    if (self.peek(0).isFalsey()) self.ip += offset;
+                    const offset = frame.readShort();
+                    if (self.peek(0).isFalsey()) frame.ip += offset;
                 },
                 @intFromEnum(OpCode.LOOP) => {
-                    const offset = self.readShort();
-                    self.ip -= offset;
+                    const offset = frame.readShort();
+                    frame.ip -= offset;
                 },
                 @intFromEnum(OpCode.RETURN) => {
                     // Exit interpreter
