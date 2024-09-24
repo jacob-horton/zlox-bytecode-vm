@@ -16,9 +16,11 @@ const Compiler = zlox_compiler.Compiler;
 
 const Obj = zlox_object.Obj;
 const String = zlox_object.Obj.String;
+const Closure = zlox_object.Obj.Closure;
 const Function = zlox_object.Obj.Function;
 const Native = zlox_object.Obj.Native;
 const NativeFn = zlox_object.NativeFn;
+const Upvalue = zlox_object.Obj.Upvalue;
 
 const Table = zlox_table.Table;
 
@@ -44,7 +46,7 @@ const RuntimeError = error{
 };
 
 const CallFrame = struct {
-    function: *Function,
+    closure: *Closure,
     ip: [*]u8,
     slots: [*]Value,
 
@@ -61,7 +63,7 @@ const CallFrame = struct {
     }
 
     fn readConstant(self: *CallFrame) Value {
-        return self.function.chunk.constants.items[self.readByte()];
+        return self.closure.function.chunk.constants.items[self.readByte()];
     }
 
     fn readString(self: *CallFrame) *String {
@@ -77,6 +79,7 @@ pub const VM = struct {
     frame_count: usize,
 
     strings: Table,
+    open_upvalues: ?*Upvalue,
     globals: Table,
 
     allocator: std.mem.Allocator,
@@ -94,6 +97,7 @@ pub const VM = struct {
             .stack_top = 0,
 
             .strings = Table.init(allocator),
+            .open_upvalues = null,
             .globals = Table.init(allocator),
         };
 
@@ -112,7 +116,11 @@ pub const VM = struct {
         const result = compiler.compile(source) catch null;
         if (result) |function| {
             self.push(Value{ .obj = &function.obj });
-            _ = self.call(function, 0);
+            const closure = try Closure.init(self, function);
+            _ = self.pop();
+            self.push(Value{ .obj = &closure.obj });
+
+            _ = self.call(closure, 0);
 
             return try self.run();
         } else {
@@ -147,10 +155,10 @@ pub const VM = struct {
             i -= 1;
 
             const frame = &self.frames[i];
-            const function = frame.function;
+            const function = frame.closure.function;
             const instruction = zlox_common.ptrOffset(u8, function.chunk.code.items.ptr, frame.ip) - 1;
 
-            std.debug.print("[line {d}] in ", .{frame.function.chunk.getLine(instruction).?});
+            std.debug.print("[line {d}] in ", .{function.chunk.getLine(instruction).?});
             if (function.name) |name| {
                 std.debug.print("{s}()\n", .{name.chars});
             } else {
@@ -201,7 +209,7 @@ pub const VM = struct {
         switch (callee) {
             .obj => |obj| {
                 switch (obj.type) {
-                    .FUNCTION => return self.call(obj.as(Function), arg_count),
+                    .CLOSURE => return self.call(obj.as(Closure), arg_count),
                     .NATIVE => {
                         const native = obj.as(Native);
                         const result = native.function(arg_count, @as([*]Value, &self.stack) + self.stack_top - arg_count);
@@ -220,9 +228,9 @@ pub const VM = struct {
         return false;
     }
 
-    fn call(self: *VM, function: *Function, arg_count: u8) bool {
-        if (arg_count != function.arity) {
-            _ = self.runtimeError("Expected {d} arguments, but got {d}.", .{ function.arity, arg_count });
+    fn call(self: *VM, closure: *Closure, arg_count: u8) bool {
+        if (arg_count != closure.function.arity) {
+            _ = self.runtimeError("Expected {d} arguments, but got {d}.", .{ closure.function.arity, arg_count });
             return false;
         }
 
@@ -234,10 +242,46 @@ pub const VM = struct {
         const frame = &self.frames[self.frame_count];
         self.frame_count += 1;
 
-        frame.function = function;
-        frame.ip = function.chunk.code.items.ptr;
+        frame.closure = closure;
+        frame.ip = closure.function.chunk.code.items.ptr;
         frame.slots = @as([*]Value, &self.stack) + self.stack_top - arg_count - 1;
         return true;
+    }
+
+    fn captureUpvalue(self: *VM, local: *Value) !*Upvalue {
+        var prev_upvalue: ?*Upvalue = null;
+        var upvalue = self.open_upvalues;
+
+        while (upvalue != null and @intFromPtr(upvalue.?.location) > @intFromPtr(local)) {
+            prev_upvalue = upvalue;
+            upvalue = upvalue.?.next;
+        }
+
+        if (upvalue) |up| {
+            if (up.location == local) {
+                return up;
+            }
+        }
+
+        const created_upvalue = try Upvalue.init(self, local);
+        created_upvalue.next = upvalue;
+
+        if (prev_upvalue) |up| {
+            up.next = created_upvalue;
+        } else {
+            self.open_upvalues = created_upvalue;
+        }
+
+        return created_upvalue;
+    }
+
+    fn closeUpvalues(self: *VM, last: *Value) void {
+        while (self.open_upvalues != null and @intFromPtr(self.open_upvalues.?.location) >= @intFromPtr(last)) {
+            const upvalue = self.open_upvalues.?;
+            upvalue.closed = upvalue.location.*;
+            upvalue.location = &upvalue.closed;
+            self.open_upvalues = upvalue.next;
+        }
     }
 
     fn run(self: *VM) !InterpretResult {
@@ -255,8 +299,8 @@ pub const VM = struct {
 
                 std.debug.print("\n", .{});
 
-                const offset = zlox_common.ptrOffset(u8, frame.function.chunk.code.items.ptr, frame.ip);
-                _ = zlox_debug.disassembleInstruction(&frame.function.chunk, offset, prev_offset);
+                const offset = zlox_common.ptrOffset(u8, frame.closure.function.chunk.code.items.ptr, frame.ip);
+                _ = zlox_debug.disassembleInstruction(&frame.closure.function.chunk, offset, prev_offset);
                 prev_offset = offset;
             }
 
@@ -270,6 +314,15 @@ pub const VM = struct {
                 @intFromEnum(OpCode.TRUE) => self.push(Value{ .boolean = true }),
                 @intFromEnum(OpCode.FALSE) => self.push(Value{ .boolean = false }),
                 @intFromEnum(OpCode.POP) => _ = self.pop(),
+                @intFromEnum(OpCode.SET_UPVALUE) => {
+                    const slot = frame.readByte();
+                    // TODO: check
+                    frame.closure.upvalues[slot].?.location.* = self.peek(0).*;
+                },
+                @intFromEnum(OpCode.GET_UPVALUE) => {
+                    const slot = frame.readByte();
+                    self.push(frame.closure.upvalues[slot].?.location.*);
+                },
                 @intFromEnum(OpCode.SET_LOCAL) => {
                     const slot = frame.readByte();
                     frame.slots[slot] = self.peek(0).*;
@@ -340,8 +393,29 @@ pub const VM = struct {
                     }
                     frame = &self.frames[self.frame_count - 1];
                 },
+                @intFromEnum(OpCode.CLOSURE) => {
+                    const function = frame.readConstant().obj.as(Function);
+                    const closure = try Closure.init(self, function);
+                    self.push(Value{ .obj = &closure.obj });
+
+                    for (0..closure.upvalue_count) |i| {
+                        const is_local = frame.readByte() > 0;
+                        const index = frame.readByte();
+
+                        if (is_local) {
+                            closure.upvalues[0] = try self.captureUpvalue(&(frame.slots + index)[0]);
+                        } else {
+                            closure.upvalues[i] = frame.closure.upvalues[index];
+                        }
+                    }
+                },
+                @intFromEnum(OpCode.CLOSE_UPVALUE) => {
+                    self.closeUpvalues(&self.stack[self.stack_top - 1]);
+                    _ = self.pop();
+                },
                 @intFromEnum(OpCode.RETURN) => {
                     const result = self.pop();
+                    self.closeUpvalues(&frame.slots[0]);
                     self.frame_count -= 1;
                     if (self.frame_count == 0) {
                         _ = self.pop();

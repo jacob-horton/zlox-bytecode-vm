@@ -12,8 +12,10 @@ const VM = zlox_vm.VM;
 
 pub const ObjType = enum {
     STRING,
+    CLOSURE,
     FUNCTION,
     NATIVE,
+    UPVALUE,
 };
 
 pub const NativeFn = *const fn (arg_count: u8, args: [*]Value) Value;
@@ -40,12 +42,10 @@ pub const Obj = struct {
                 const str = self.as(String);
                 std.debug.print("{s}", .{str.chars});
             },
-            .FUNCTION => {
-                self.as(Function).print();
-            },
-            .NATIVE => {
-                self.as(Native).print();
-            },
+            .CLOSURE => self.as(Closure).print(),
+            .FUNCTION => self.as(Function).print(),
+            .NATIVE => self.as(Native).print(),
+            .UPVALUE => self.as(Upvalue).print(),
         }
     }
 
@@ -54,6 +54,7 @@ pub const Obj = struct {
             .STRING => self.as(String).deinit(),
             .FUNCTION => self.as(Function).deinit(),
             .NATIVE => self.as(Native).deinit(),
+            .UPVALUE => self.as(Upvalue).deinit(),
         }
     }
 
@@ -117,15 +118,48 @@ pub const Obj = struct {
         }
     };
 
+    pub const Closure = struct {
+        obj: Obj,
+        function: *Function,
+        upvalues: []?*Upvalue,
+        upvalue_count: usize,
+
+        /// Does not own `function`
+        pub fn init(vm: *VM, function: *Function) !*Closure {
+            const closure = (try Obj.init(vm, Closure, .CLOSURE)).as(Closure);
+            closure.function = function;
+            closure.upvalues = try vm.allocator.alloc(?*Upvalue, function.upvalue_count);
+            closure.upvalue_count = function.upvalue_count;
+
+            for (0..function.upvalue_count) |i| {
+                // TODO: check if we want null here for the garbage collector?
+                closure.upvalues[i] = null;
+            }
+
+            return closure;
+        }
+
+        pub fn deinit(self: *Closure) void {
+            self.obj.vm.allocator.free(self.upvalues);
+            self.obj.vm.allocator.destroy(self);
+        }
+
+        pub fn print(self: *Closure) void {
+            self.function.print();
+        }
+    };
+
     pub const Function = struct {
         obj: Obj,
         arity: usize,
+        upvalue_count: usize,
         chunk: Chunk,
         name: ?*String,
 
         pub fn init(vm: *VM) !*Function {
             const fun = (try Obj.init(vm, Function, .FUNCTION)).as(Function);
             fun.arity = 0;
+            fun.upvalue_count = 0;
             fun.name = null;
             fun.chunk = Chunk.init(vm.allocator);
 
@@ -163,6 +197,31 @@ pub const Obj = struct {
 
         pub fn print(_: *Native) void {
             std.debug.print("<native fn>", .{});
+        }
+    };
+
+    pub const Upvalue = struct {
+        obj: Obj,
+        location: *Value,
+        closed: Value,
+        next: ?*Upvalue,
+
+        /// Does not own slot
+        pub fn init(vm: *VM, slot: *Value) !*Upvalue {
+            const upvalue = (try Obj.init(vm, Upvalue, .UPVALUE)).as(Upvalue);
+            upvalue.location = slot;
+            upvalue.next = null;
+            upvalue.closed = .nil;
+
+            return upvalue;
+        }
+
+        pub fn deinit(self: *Native) void {
+            self.obj.vm.allocator.destroy(self);
+        }
+
+        pub fn print(_: Upvalue) void {
+            std.debug.print("upvalue", .{});
         }
     };
 };

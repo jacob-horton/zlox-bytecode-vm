@@ -1,9 +1,12 @@
 const std = @import("std");
 
 const zlox_chunk = @import("chunk.zig");
+const zlox_object = @import("object.zig");
 
 const Chunk = zlox_chunk.Chunk;
 const OpCode = zlox_chunk.OpCode;
+
+const Function = zlox_object.Obj.Function;
 
 pub fn disassembleChunk(chunk: *Chunk, name: []const u8) void {
     std.debug.print("== {s} ==\n", .{name});
@@ -28,6 +31,30 @@ pub fn disassembleInstruction(chunk: *Chunk, offset: usize, prev_offset: usize) 
     const instruction = chunk.code.items[offset];
     switch (instruction) {
         @intFromEnum(OpCode.CALL) => return byteInstruction(instruction, chunk, offset),
+        @intFromEnum(OpCode.CLOSURE) => {
+            var new_offset = offset + 1;
+            const constant = chunk.code.items[new_offset];
+            new_offset += 1;
+
+            const name = @tagName(@as(OpCode, @enumFromInt(instruction)));
+            std.debug.print("{s:<16} {d:4} ", .{ name, constant });
+            chunk.constants.items[constant].print();
+            std.debug.print("\n", .{});
+
+            const function = chunk.constants.items[constant].obj.as(Function);
+            for (0..function.upvalue_count) |_| {
+                const is_local = chunk.code.items[new_offset] > 0;
+                new_offset += 1;
+
+                const index = chunk.code.items[new_offset];
+                new_offset += 1;
+
+                std.debug.print("{d:4}      |                     {s} {d}\n", .{ new_offset - 2, if (is_local) "local" else "upvalue", index });
+            }
+
+            return new_offset;
+        },
+        @intFromEnum(OpCode.CLOSE_UPVALUE) => return simpleInstruction(instruction, offset),
         @intFromEnum(OpCode.RETURN) => return simpleInstruction(instruction, offset),
         @intFromEnum(OpCode.NIL) => return simpleInstruction(instruction, offset),
         @intFromEnum(OpCode.TRUE) => return simpleInstruction(instruction, offset),
@@ -37,6 +64,8 @@ pub fn disassembleInstruction(chunk: *Chunk, offset: usize, prev_offset: usize) 
         @intFromEnum(OpCode.JUMP) => return jumpInstruction(instruction, 1, chunk, offset),
         @intFromEnum(OpCode.JUMP_IF_FALSE) => return jumpInstruction(instruction, 1, chunk, offset),
         @intFromEnum(OpCode.LOOP) => return jumpInstruction(instruction, -1, chunk, offset),
+        @intFromEnum(OpCode.SET_UPVALUE) => return byteInstruction(instruction, chunk, offset),
+        @intFromEnum(OpCode.GET_UPVALUE) => return byteInstruction(instruction, chunk, offset),
         @intFromEnum(OpCode.SET_LOCAL) => return byteInstruction(instruction, chunk, offset),
         @intFromEnum(OpCode.GET_LOCAL) => return byteInstruction(instruction, chunk, offset),
         @intFromEnum(OpCode.SET_GLOBAL) => return constantInstruction(instruction, chunk, offset),

@@ -11,6 +11,9 @@ pub const OpCode = enum(u8) {
     TRUE,
     FALSE,
     POP,
+    CLOSE_UPVALUE,
+    SET_UPVALUE,
+    GET_UPVALUE,
     SET_GLOBAL,
     GET_GLOBAL,
     SET_LOCAL,
@@ -30,6 +33,7 @@ pub const OpCode = enum(u8) {
     JUMP_IF_FALSE,
     LOOP,
     CALL,
+    CLOSURE,
     RETURN,
 };
 

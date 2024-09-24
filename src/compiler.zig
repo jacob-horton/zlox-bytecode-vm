@@ -86,6 +86,12 @@ fn getRule(typ: TokenType) *const ParseRule {
 pub const Local = struct {
     name: Token,
     depth: ?usize,
+    is_captured: bool,
+};
+
+pub const Upvalue = struct {
+    index: u8,
+    is_local: bool,
 };
 
 pub const Compiler = struct {
@@ -97,6 +103,8 @@ pub const Compiler = struct {
     local_count: usize,
     scope_depth: usize,
 
+    upvalues: [zlox_common.U8_COUNT]Upvalue,
+
     vm: *VM,
     parser: *Parser,
 
@@ -105,6 +113,8 @@ pub const Compiler = struct {
             .local_count = 0,
             .scope_depth = 0,
             .locals = undefined,
+
+            .upvalues = undefined,
 
             .function = undefined,
             .type = typ,
@@ -124,6 +134,7 @@ pub const Compiler = struct {
         local.depth = 0;
         local.name.start = "";
         local.name.length = 0;
+        local.is_captured = false;
 
         return compiler;
     }
@@ -246,7 +257,12 @@ const Parser = struct {
         try self.block();
 
         const fun = try self.current_compiler.end();
-        try self.emitBytes(@intFromEnum(OpCode.CONSTANT), try self.makeConstant(Value{ .obj = &fun.obj }));
+        try self.emitBytes(@intFromEnum(OpCode.CLOSURE), try self.makeConstant(Value{ .obj = &fun.obj }));
+
+        for (0..fun.upvalue_count) |i| {
+            try self.emitByte(if (compiler.upvalues[i].is_local) 1 else 0);
+            try self.emitByte(compiler.upvalues[i].index);
+        }
     }
 
     fn synchronise(self: *Parser) void {
@@ -302,7 +318,7 @@ const Parser = struct {
         return try self.identifierConstant(&self.previous);
     }
 
-    fn identifierConstant(self: *Parser, name: *Token) !u8 {
+    fn identifierConstant(self: *Parser, name: *const Token) !u8 {
         const str = try String.copyInit(self.vm, name.start, name.length);
         return try self.makeConstant(Value{ .obj = &str.obj });
     }
@@ -340,6 +356,7 @@ const Parser = struct {
 
         local.name = name;
         local.depth = null;
+        local.is_captured = false;
     }
 
     fn and_(self: *Parser, _: bool) !void {
@@ -565,7 +582,12 @@ const Parser = struct {
         self.current_compiler.scope_depth -= 1;
 
         while (self.shouldPopFromScope()) {
-            try self.emitByte(@intFromEnum(OpCode.POP));
+            if (self.current_compiler.locals[self.current_compiler.local_count - 1].is_captured) {
+                try self.emitByte(@intFromEnum(OpCode.CLOSE_UPVALUE));
+            } else {
+                try self.emitByte(@intFromEnum(OpCode.POP));
+            }
+
             self.current_compiler.local_count -= 1;
         }
     }
@@ -603,21 +625,28 @@ const Parser = struct {
     }
 
     fn variable(self: *Parser, can_assign: bool) !void {
-        try self.namedVariable(&self.previous, can_assign);
+        try self.namedVariable(self.previous, can_assign);
     }
 
-    fn namedVariable(self: *Parser, name: *Token, can_assign: bool) !void {
+    fn namedVariable(self: *Parser, name: Token, can_assign: bool) !void {
         var get_op: OpCode = undefined;
         var set_op: OpCode = undefined;
-        var arg = self.resolveLocal(self.current_compiler, name);
+        var arg = self.resolveLocal(self.current_compiler, &name);
 
         if (arg != -1) {
             get_op = .GET_LOCAL;
             set_op = .SET_LOCAL;
         } else {
-            arg = try self.identifierConstant(name);
-            get_op = .GET_GLOBAL;
-            set_op = .SET_GLOBAL;
+            arg = self.resolveUpvalue(self.current_compiler, &name);
+
+            if (arg != -1) {
+                get_op = .GET_UPVALUE;
+                set_op = .SET_UPVALUE;
+            } else {
+                arg = try self.identifierConstant(&name);
+                get_op = .GET_GLOBAL;
+                set_op = .SET_GLOBAL;
+            }
         }
 
         if (can_assign and self.match(.EQUAL)) {
@@ -628,7 +657,51 @@ const Parser = struct {
         }
     }
 
-    fn resolveLocal(self: *Parser, compiler: *Compiler, name: *Token) isize {
+    // TODO: use null instead of -1
+    fn resolveUpvalue(self: *Parser, compiler: *Compiler, name: *const Token) isize {
+        if (compiler.enclosing == null) return -1;
+
+        const local = self.resolveLocal(compiler.enclosing.?, name);
+        if (local != -1) {
+            compiler.enclosing.?.locals[@intCast(local)].is_captured = true;
+            return self.addUpvalue(compiler, @intCast(local), true);
+        }
+
+        // Go up through enclosing compilers until an actual local variable is found
+        // Then unwind by creating a chain upvalues that eventually point to that local variable
+        const upvalue = self.resolveUpvalue(compiler.enclosing.?, name);
+        if (upvalue != -1) {
+            return self.addUpvalue(compiler, @intCast(upvalue), false);
+        }
+
+        return -1;
+    }
+
+    // TODO: use null instead of -1
+    fn addUpvalue(self: *Parser, compiler: *Compiler, index: u8, is_local: bool) isize {
+        const upvalue_count = compiler.function.upvalue_count;
+
+        for (0..upvalue_count) |i| {
+            const upvalue = &compiler.upvalues[i];
+            if (upvalue.index == index and upvalue.is_local == is_local) {
+                return @intCast(i);
+            }
+        }
+
+        if (upvalue_count >= zlox_common.U8_COUNT) {
+            self.err("Too many closure variables in funciton.");
+            return 0;
+        }
+
+        compiler.upvalues[upvalue_count].is_local = is_local;
+        compiler.upvalues[upvalue_count].index = index;
+
+        compiler.function.upvalue_count += 1;
+        return @intCast(upvalue_count);
+    }
+
+    // TODO: use null instead of -1
+    fn resolveLocal(self: *Parser, compiler: *Compiler, name: *const Token) isize {
         var i = compiler.local_count;
         while (i > 0) {
             i -= 1;
@@ -726,6 +799,7 @@ const Parser = struct {
         while (@intFromEnum(precedence) <= @intFromEnum(getRule(self.current.type).precedence)) {
             self.advance();
             // TODO: handle null infix?
+            // Happens with `fn add`
             const infix_rule = getRule(self.previous.type).infix.?;
             try infix_rule(self, can_assign);
         }

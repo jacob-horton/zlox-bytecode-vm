@@ -215,7 +215,7 @@ pub const Token = struct {
     length: usize,
     line: usize,
 
-    pub fn identifiersEqual(a: *Token, b: *Token) bool {
+    pub fn identifiersEqual(a: *const Token, b: *const Token) bool {
         return std.mem.eql(u8, a.start[0..a.length], b.start[0..b.length]);
     }
 };
