@@ -12,14 +12,12 @@ const MAX_LOAD: f32 = 0.75;
 pub const Table = struct {
     allocator: std.mem.Allocator,
     count: usize,
-    capacity: usize,
     entries: ?[]Entry,
 
     pub fn init(allocator: std.mem.Allocator) Table {
         return Table{
             .allocator = allocator,
             .count = 0,
-            .capacity = 0,
             .entries = null,
         };
     }
@@ -32,11 +30,11 @@ pub const Table = struct {
 
     /// Returns `true` if it's a new key
     pub fn set(self: *Table, key: *String, value: Value) !bool {
-        if (@as(f32, @floatFromInt(self.count + 1)) > @as(f32, @floatFromInt(self.capacity)) * MAX_LOAD) {
+        if (self.entries == null or @as(f32, @floatFromInt(self.count + 1)) > @as(f32, @floatFromInt(self.entries.?.len)) * MAX_LOAD) {
             try self.growCapacity();
         }
 
-        const entry = self.findEntry(key).?;
+        const entry = Table.findEntry(self.entries, key).?;
         const is_new_key = entry.key == null;
         if (is_new_key and entry.value == .nil) self.count += 1;
 
@@ -49,13 +47,13 @@ pub const Table = struct {
     /// Returns `null` if there are no entries
     /// If the key is found, it will return the entry associated with it
     /// Otherwise, it will return a pointer to the bucket that key would exist in
-    fn findEntry(self: *Table, key: *String) ?*Entry {
-        if (self.entries == null) return null;
+    fn findEntry(entries: ?[]Entry, key: *String) ?*Entry {
+        if (entries == null) return null;
 
-        var index = key.hash % self.capacity;
+        var index = key.hash % entries.?.len;
 
         while (true) {
-            const entry = &self.entries.?[index];
+            const entry = &entries.?[index];
             var tombstone: ?*Entry = null;
 
             if (entry.key == null) {
@@ -71,12 +69,12 @@ pub const Table = struct {
                 return entry;
             }
 
-            index = (index + 1) % self.capacity;
+            index = (index + 1) % entries.?.len;
         }
     }
 
     fn growCapacity(self: *Table) !void {
-        const new_capacity = if (self.capacity < 8) 8 else self.capacity * 2;
+        const new_capacity = if (self.entries == null or self.entries.?.len < 8) 8 else self.entries.?.len * 2;
         const entries = try self.allocator.alloc(Entry, new_capacity);
 
         // Set default values
@@ -91,7 +89,7 @@ pub const Table = struct {
         if (self.entries) |old_entries| {
             for (old_entries) |entry| {
                 if (entry.key) |entry_key| {
-                    const dest = self.findEntry(entry_key).?;
+                    const dest = Table.findEntry(entries, entry_key).?;
                     dest.key = entry_key;
                     dest.value = entry.value;
                     self.count += 1;
@@ -102,7 +100,6 @@ pub const Table = struct {
         }
 
         self.entries = entries;
-        self.capacity = new_capacity;
     }
 
     fn addAll(self: *Table, from: *Table) void {
@@ -118,18 +115,18 @@ pub const Table = struct {
     /// Will fill `value` with the value associated with `key`
     /// Returns true if the item was found
     pub fn get(self: *Table, key: *String, value: *Value) bool {
-        const entry = self.findEntry(key);
+        const entry = Table.findEntry(self.entries, key);
         if (entry == null or entry.?.key == null) {
             return false;
         }
 
-        value.* = entry.?.value;
+        value.* = entry.?.*.value;
         return true;
     }
 
     /// Returns true if the item was found
     pub fn delete(self: *Table, key: *String) bool {
-        const entry = self.findEntry(key);
+        const entry = Table.findEntry(self.entries, key);
         if (entry == null or entry.?.key == null) {
             return false;
         }
@@ -143,13 +140,13 @@ pub const Table = struct {
     pub fn findString(self: *Table, key: [*]const u8, len: usize, hash: u32) ?*String {
         if (self.entries == null) return null;
 
-        var index = hash % self.capacity;
+        var index = hash % self.entries.?.len;
 
         while (true) {
             const entry = &self.entries.?[index];
 
             if (entry.key) |entry_key| {
-                if (entry_key.chars.len == len and entry_key.hash == hash and std.mem.eql(u8, entry_key.chars, key[0..len])) {
+                if (entry_key.hash == hash and std.mem.eql(u8, entry_key.chars, key[0..len])) {
                     return entry.key;
                 }
             } else {
@@ -159,7 +156,7 @@ pub const Table = struct {
                 }
             }
 
-            index = (index + 1) % self.capacity;
+            index = (index + 1) % self.entries.?.len;
         }
     }
 };
