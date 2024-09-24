@@ -27,6 +27,7 @@ pub fn disassembleInstruction(chunk: *Chunk, offset: usize, prev_offset: usize) 
 
     const instruction = chunk.code.items[offset];
     switch (instruction) {
+        @intFromEnum(OpCode.CALL) => return byteInstruction(instruction, chunk, offset),
         @intFromEnum(OpCode.RETURN) => return simpleInstruction(instruction, offset),
         @intFromEnum(OpCode.NIL) => return simpleInstruction(instruction, offset),
         @intFromEnum(OpCode.TRUE) => return simpleInstruction(instruction, offset),

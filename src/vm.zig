@@ -4,6 +4,7 @@ const zlox_chunk = @import("chunk.zig");
 const zlox_common = @import("common.zig");
 const zlox_compiler = @import("compiler.zig");
 const zlox_debug = @import("debug.zig");
+const zlox_native = @import("native.zig");
 const zlox_object = @import("object.zig");
 const zlox_table = @import("table.zig");
 const zlox_value = @import("value.zig");
@@ -16,6 +17,8 @@ const Compiler = zlox_compiler.Compiler;
 const Obj = zlox_object.Obj;
 const String = zlox_object.Obj.String;
 const Function = zlox_object.Obj.Function;
+const Native = zlox_object.Obj.Native;
+const NativeFn = zlox_object.NativeFn;
 
 const Table = zlox_table.Table;
 
@@ -78,8 +81,8 @@ pub const VM = struct {
 
     allocator: std.mem.Allocator,
 
-    pub fn init(allocator: std.mem.Allocator) VM {
-        return VM{
+    pub fn init(allocator: std.mem.Allocator) !VM {
+        var vm = VM{
             .allocator = allocator,
 
             // This will get set up when calling `interpret()` before doing anything
@@ -93,6 +96,9 @@ pub const VM = struct {
             .strings = Table.init(allocator),
             .globals = Table.init(allocator),
         };
+
+        try vm.defineNative("clock", &zlox_native.clock);
+        return vm;
     }
 
     pub fn deinit(self: *VM) void {
@@ -101,18 +107,12 @@ pub const VM = struct {
     }
 
     pub fn interpret(self: *VM, source: []u8) !InterpretResult {
-        var compiler = try Compiler.init(self, .SCRIPT);
+        var compiler = try Compiler.init(self, null, .SCRIPT);
 
         const result = compiler.compile(source) catch null;
         if (result) |function| {
             self.push(Value{ .obj = &function.obj });
-
-            var frame = &self.frames[self.frame_count];
-            self.frame_count += 1;
-
-            frame.function = function;
-            frame.ip = function.chunk.code.items.ptr;
-            frame.slots = &self.stack;
+            _ = self.call(function, 0);
 
             return try self.run();
         } else {
@@ -142,11 +142,23 @@ pub const VM = struct {
         std.debug.print(fmt, args);
         std.debug.print("\n", .{});
 
-        const frame = &self.frames[self.frame_count - 1];
-        const instruction = zlox_common.ptrOffset(u8, frame.function.chunk.code.items.ptr, frame.ip);
-        std.debug.print("[line {d}] in script\n", .{frame.function.chunk.getLine(instruction).?});
-        self.resetStack();
+        var i = self.frame_count;
+        while (i > 0) {
+            i -= 1;
 
+            const frame = &self.frames[i];
+            const function = frame.function;
+            const instruction = zlox_common.ptrOffset(u8, function.chunk.code.items.ptr, frame.ip) - 1;
+
+            std.debug.print("[line {d}] in ", .{frame.function.chunk.getLine(instruction).?});
+            if (function.name) |name| {
+                std.debug.print("{s}()\n", .{name.chars});
+            } else {
+                std.debug.print("script\n", .{});
+            }
+        }
+
+        self.resetStack();
         return .RUNTIME_ERROR;
     }
 
@@ -173,9 +185,63 @@ pub const VM = struct {
         });
     }
 
-    fn run(self: *VM) !InterpretResult {
-        const frame = &self.frames[self.frame_count - 1];
+    fn defineNative(self: *VM, name: []const u8, function: NativeFn) !void {
+        const str = try String.copyInit(self, name.ptr, name.len);
+        self.push(Value{ .obj = &str.obj });
+        const native = try Native.init(self, function);
+        self.push(Value{ .obj = &native.obj });
 
+        _ = try self.globals.set(self.stack[0].obj.as(String), self.stack[1]);
+
+        _ = self.pop();
+        _ = self.pop();
+    }
+
+    fn callValue(self: *VM, callee: Value, arg_count: u8) bool {
+        switch (callee) {
+            .obj => |obj| {
+                switch (obj.type) {
+                    .FUNCTION => return self.call(obj.as(Function), arg_count),
+                    .NATIVE => {
+                        const native = obj.as(Native);
+                        const result = native.function(arg_count, @as([*]Value, &self.stack) + self.stack_top - arg_count);
+                        self.stack_top -= arg_count + 1;
+                        self.push(result);
+
+                        return true;
+                    },
+                    else => {}, // Non-callable object type
+                }
+            },
+            else => {}, // Non-callable value
+        }
+
+        _ = self.runtimeError("Can only call functions and classes.", .{});
+        return false;
+    }
+
+    fn call(self: *VM, function: *Function, arg_count: u8) bool {
+        if (arg_count != function.arity) {
+            _ = self.runtimeError("Expected {d} arguments, but got {d}.", .{ function.arity, arg_count });
+            return false;
+        }
+
+        if (self.frame_count >= FRAMES_MAX) {
+            _ = self.runtimeError("Stack overflow.", .{});
+            return false;
+        }
+
+        const frame = &self.frames[self.frame_count];
+        self.frame_count += 1;
+
+        frame.function = function;
+        frame.ip = function.chunk.code.items.ptr;
+        frame.slots = @as([*]Value, &self.stack) + self.stack_top - arg_count - 1;
+        return true;
+    }
+
+    fn run(self: *VM) !InterpretResult {
+        var frame = &self.frames[self.frame_count - 1];
         var prev_offset: usize = 0;
 
         while (true) {
@@ -267,9 +333,25 @@ pub const VM = struct {
                     const offset = frame.readShort();
                     frame.ip -= offset;
                 },
+                @intFromEnum(OpCode.CALL) => {
+                    const arg_count = frame.readByte();
+                    if (!self.callValue(self.peek(arg_count).*, arg_count)) {
+                        return .RUNTIME_ERROR;
+                    }
+                    frame = &self.frames[self.frame_count - 1];
+                },
                 @intFromEnum(OpCode.RETURN) => {
-                    // Exit interpreter
-                    return .OK;
+                    const result = self.pop();
+                    self.frame_count -= 1;
+                    if (self.frame_count == 0) {
+                        _ = self.pop();
+                        return .OK;
+                    }
+
+                    // std.debug.print("{d} {d}\n", .{ @intFromPtr(frame.slots), @intFromPtr(&self.stack) });
+                    self.stack_top = zlox_common.ptrOffset(Value, &self.stack, frame.slots);
+                    self.push(result);
+                    frame = &self.frames[self.frame_count - 1];
                 },
                 else => {
                     std.debug.print("Unknown opcode {d}\n", .{instruction});

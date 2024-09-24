@@ -6,12 +6,17 @@ const zlox_vm = @import("vm.zig");
 
 const Chunk = zlox_chunk.Chunk;
 
+const Value = zlox_value.Value;
+
 const VM = zlox_vm.VM;
 
 pub const ObjType = enum {
     STRING,
     FUNCTION,
+    NATIVE,
 };
+
+pub const NativeFn = *const fn (arg_count: u8, args: [*]Value) Value;
 
 pub const Obj = struct {
     type: ObjType,
@@ -38,6 +43,9 @@ pub const Obj = struct {
             .FUNCTION => {
                 self.as(Function).print();
             },
+            .NATIVE => {
+                self.as(Native).print();
+            },
         }
     }
 
@@ -45,6 +53,7 @@ pub const Obj = struct {
         switch (self.type) {
             .STRING => self.as(String).deinit(),
             .FUNCTION => self.as(Function).deinit(),
+            .NATIVE => self.as(Native).deinit(),
         }
     }
 
@@ -134,6 +143,26 @@ pub const Obj = struct {
             } else {
                 std.debug.print("<script>", .{});
             }
+        }
+    };
+
+    pub const Native = struct {
+        obj: Obj,
+        function: NativeFn,
+
+        pub fn init(vm: *VM, function: NativeFn) !*Native {
+            const native = (try Obj.init(vm, Native, .NATIVE)).as(Native);
+            native.function = function;
+
+            return native;
+        }
+
+        pub fn deinit(self: *Native) void {
+            self.obj.vm.allocator.destroy(self);
+        }
+
+        pub fn print(_: *Native) void {
+            std.debug.print("<native fn>", .{});
         }
     };
 };

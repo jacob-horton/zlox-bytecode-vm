@@ -55,7 +55,7 @@ pub fn main() !void {
 
     const allocator = arena.allocator();
 
-    var vm = VM.init(allocator);
+    var vm = try VM.init(allocator);
 
     if (args.next()) |file_name| {
         if (args.next() != null) {

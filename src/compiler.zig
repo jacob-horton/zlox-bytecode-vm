@@ -55,16 +55,16 @@ const rules = blk: {
     // Rules for each token type. Default is { .infix = null, .prefix = null, .precedence = .NONE }
     var _rules = [_]ParseRule{ParseRule{}} ** num_token_types;
 
-    _rules[@intFromEnum(TokenType.LEFT_PAREN)] = ParseRule{ .prefix = Parser.grouping };
-    _rules[@intFromEnum(TokenType.BANG)] = ParseRule{ .prefix = &Parser.unary };
-    _rules[@intFromEnum(TokenType.BANG_EQUAL)] = ParseRule{ .infix = &Parser.binary, .precedence = .EQUALITY };
-    _rules[@intFromEnum(TokenType.EQUAL_EQUAL)] = ParseRule{ .infix = &Parser.binary, .precedence = .EQUALITY };
-    _rules[@intFromEnum(TokenType.GREATER)] = ParseRule{ .infix = &Parser.binary, .precedence = .COMPARISON };
-    _rules[@intFromEnum(TokenType.GREATER_EQUAL)] = ParseRule{ .infix = &Parser.binary, .precedence = .COMPARISON };
-    _rules[@intFromEnum(TokenType.LESS)] = ParseRule{ .infix = &Parser.binary, .precedence = .COMPARISON };
-    _rules[@intFromEnum(TokenType.LESS_EQUAL)] = ParseRule{ .infix = &Parser.binary, .precedence = .COMPARISON };
-    _rules[@intFromEnum(TokenType.IDENTIFIER)] = ParseRule{ .prefix = &Parser.variable, .precedence = .COMPARISON };
-    _rules[@intFromEnum(TokenType.MINUS)] = ParseRule{ .prefix = &Parser.unary, .infix = Parser.binary, .precedence = .TERM };
+    _rules[@intFromEnum(TokenType.LEFT_PAREN)] = ParseRule{ .prefix = Parser.grouping, .infix = Parser.call, .precedence = .CALL };
+    _rules[@intFromEnum(TokenType.BANG)] = ParseRule{ .prefix = Parser.unary };
+    _rules[@intFromEnum(TokenType.BANG_EQUAL)] = ParseRule{ .infix = Parser.binary, .precedence = .EQUALITY };
+    _rules[@intFromEnum(TokenType.EQUAL_EQUAL)] = ParseRule{ .infix = Parser.binary, .precedence = .EQUALITY };
+    _rules[@intFromEnum(TokenType.GREATER)] = ParseRule{ .infix = Parser.binary, .precedence = .COMPARISON };
+    _rules[@intFromEnum(TokenType.GREATER_EQUAL)] = ParseRule{ .infix = Parser.binary, .precedence = .COMPARISON };
+    _rules[@intFromEnum(TokenType.LESS)] = ParseRule{ .infix = Parser.binary, .precedence = .COMPARISON };
+    _rules[@intFromEnum(TokenType.LESS_EQUAL)] = ParseRule{ .infix = Parser.binary, .precedence = .COMPARISON };
+    _rules[@intFromEnum(TokenType.IDENTIFIER)] = ParseRule{ .prefix = Parser.variable, .precedence = .COMPARISON };
+    _rules[@intFromEnum(TokenType.MINUS)] = ParseRule{ .prefix = Parser.unary, .infix = Parser.binary, .precedence = .TERM };
     _rules[@intFromEnum(TokenType.PLUS)] = ParseRule{ .infix = Parser.binary, .precedence = .TERM };
     _rules[@intFromEnum(TokenType.SLASH)] = ParseRule{ .infix = Parser.binary, .precedence = .FACTOR };
     _rules[@intFromEnum(TokenType.STAR)] = ParseRule{ .infix = Parser.binary, .precedence = .FACTOR };
@@ -89,6 +89,7 @@ pub const Local = struct {
 };
 
 pub const Compiler = struct {
+    enclosing: ?*Compiler,
     function: *Function,
     type: FunctionType,
 
@@ -97,9 +98,9 @@ pub const Compiler = struct {
     scope_depth: usize,
 
     vm: *VM,
-    parser: Parser,
+    parser: *Parser,
 
-    pub fn init(vm: *VM, typ: FunctionType) !Compiler {
+    pub fn init(vm: *VM, enclosing: ?*Compiler, typ: FunctionType) !Compiler {
         var compiler = Compiler{
             .local_count = 0,
             .scope_depth = 0,
@@ -109,6 +110,7 @@ pub const Compiler = struct {
             .type = typ,
 
             .vm = vm,
+            .enclosing = enclosing,
 
             // Set up when calling `compile()`
             .parser = undefined,
@@ -129,7 +131,8 @@ pub const Compiler = struct {
     // TODO: errors instead of optionals
     pub fn compile(self: *Compiler, source: []u8) !?*Function {
         const scanner = Scanner.init(source);
-        self.parser = Parser.init(self.vm, self, scanner);
+        var parser = Parser.init(self.vm, self, scanner);
+        self.parser = &parser;
 
         try self.parser.parse();
 
@@ -196,11 +199,54 @@ const Parser = struct {
     fn declaration(self: *Parser) !void {
         if (self.match(.VAR)) {
             try self.varDeclaration();
+        } else if (self.match(.FUN)) {
+            try self.funDeclaration();
         } else {
             try self.statement();
         }
 
         if (self.panic_mode) self.synchronise();
+    }
+
+    fn funDeclaration(self: *Parser) !void {
+        const global = try self.parseVariable("Expect function name.");
+        self.markInitialised();
+        try self.function(.FUNCTION);
+        try self.defineVariable(global);
+    }
+
+    fn function(self: *Parser, typ: FunctionType) !void {
+        var compiler = try Compiler.init(self.vm, self.current_compiler, typ);
+        self.current_compiler = &compiler;
+        self.current_compiler.parser = self;
+
+        if (typ != .SCRIPT) {
+            self.current_compiler.function.name = try String.copyInit(self.vm, self.previous.start, self.previous.length);
+        }
+
+        try self.beginScope();
+        self.consume(.LEFT_PAREN, "Expect '(' after function name.");
+        if (!self.check(.RIGHT_PAREN)) {
+            var first_arg = true;
+            while (first_arg or self.match(.COMMA)) {
+                first_arg = false;
+
+                self.current_compiler.function.arity += 1;
+                if (self.current_compiler.function.arity > 255) {
+                    self.errAtCurrent("Can't have more than 255 parameters.");
+                }
+
+                const constant = try self.parseVariable("Expect parameter name.");
+                try self.defineVariable(constant);
+            }
+        }
+
+        self.consume(.RIGHT_PAREN, "Expect ')' after function parameters.");
+        self.consume(.LEFT_BRACE, "Expect '{' before function body.");
+        try self.block();
+
+        const fun = try self.current_compiler.end();
+        try self.emitBytes(@intFromEnum(OpCode.CONSTANT), try self.makeConstant(Value{ .obj = &fun.obj }));
     }
 
     fn synchronise(self: *Parser) void {
@@ -241,6 +287,7 @@ const Parser = struct {
     }
 
     fn markInitialised(self: *Parser) void {
+        if (self.current_compiler.scope_depth == 0) return;
         self.current_compiler.locals[self.current_compiler.local_count - 1].depth = self.current_compiler.scope_depth;
     }
 
@@ -336,8 +383,24 @@ const Parser = struct {
             try self.whileStatement();
         } else if (self.match(.FOR)) {
             try self.forStatement();
+        } else if (self.match(.RETURN)) {
+            try self.returnStatement();
         } else {
             try self.expressionStatement();
+        }
+    }
+
+    fn returnStatement(self: *Parser) !void {
+        if (self.current_compiler.type == .SCRIPT) {
+            self.err("Can't return from top level code");
+        }
+
+        if (self.match(.SEMICOLON)) {
+            try self.emitReturn();
+        } else {
+            try self.expression();
+            self.consume(.SEMICOLON, "Expect ';' after return value.");
+            try self.emitByte(@intFromEnum(OpCode.RETURN));
         }
     }
 
@@ -618,6 +681,27 @@ const Parser = struct {
         }
     }
 
+    fn call(self: *Parser, _: bool) !void {
+        const arg_count = try self.argumentList();
+        try self.emitBytes(@intFromEnum(OpCode.CALL), arg_count);
+    }
+
+    fn argumentList(self: *Parser) !u8 {
+        var arg_count: u8 = 0;
+        if (!self.check(.RIGHT_PAREN)) {
+            var first_arg = true;
+            while (first_arg or self.match(.COMMA)) {
+                first_arg = false;
+
+                try self.expression();
+                arg_count += 1;
+            }
+        }
+
+        self.consume(.RIGHT_PAREN, "Expect ')' after arguments.");
+        return arg_count;
+    }
+
     fn literal(self: *Parser, _: bool) !void {
         switch (self.previous.type) {
             .FALSE => try self.emitByte(@intFromEnum(OpCode.FALSE)),
@@ -699,6 +783,10 @@ const Parser = struct {
 
     fn end(self: *Parser) !void {
         try self.emitReturn();
+        // TODO: deal with optional properly
+        if (self.current_compiler.enclosing) |enclosing| {
+            self.current_compiler = enclosing;
+        }
     }
 
     fn emitConstant(self: *Parser, value: Value) !void {
@@ -706,6 +794,7 @@ const Parser = struct {
     }
 
     fn emitReturn(self: *Parser) !void {
+        try self.emitByte(@intFromEnum(OpCode.NIL));
         try self.emitByte(@intFromEnum(OpCode.RETURN));
     }
 
