@@ -93,17 +93,21 @@ fn getInstructionName(instruction: u8) []const u8 {
 }
 
 fn constantInstruction(instruction: u8, chunk: *Chunk, offset: usize) usize {
-    const constant = chunk.code.items[offset + 1];
+    var constant: isize = -1;
+    if (offset + 1 >= chunk.code.items.len) constant = chunk.code.items[offset + 1];
+
     std.debug.print("{s:<16} {d:4} '", .{ getInstructionName(instruction), constant });
 
-    chunk.constants.items[constant].print();
+    if (constant >= 0) chunk.constants.items[@intCast(constant)].print();
     std.debug.print("'\n", .{});
 
     return offset + 2;
 }
 
 fn byteInstruction(instruction: u8, chunk: *Chunk, offset: usize) usize {
-    const slot = chunk.code.items[offset + 1];
+    var slot: isize = -1;
+    if (offset + 1 >= chunk.code.items.len) slot = chunk.code.items[offset + 1];
+
     std.debug.print("{s:<16} {d:4}\n", .{ getInstructionName(instruction), slot });
 
     return offset + 2;
