@@ -1,10 +1,13 @@
 const std = @import("std");
 
 const zlox_chunk = @import("chunk.zig");
+const zlox_gc = @import("gc.zig");
 const zlox_vm = @import("vm.zig");
 
 const Chunk = zlox_chunk.Chunk;
 const OpCode = zlox_chunk.OpCode;
+
+const GC = zlox_gc.GC;
 
 const VM = zlox_vm.VM;
 
@@ -48,7 +51,10 @@ pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
 
-    const allocator = gpa.allocator();
+    var gc = GC.init(gpa.allocator());
+    defer gc.deinit();
+
+    const allocator = gc.allocator();
 
     var vm = try VM.init(allocator);
     defer vm.deinit();
