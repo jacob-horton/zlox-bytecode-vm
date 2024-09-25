@@ -83,10 +83,12 @@ pub const VM = struct {
     globals: Table,
 
     allocator: std.mem.Allocator,
+    objects: ?*Obj,
 
     pub fn init(allocator: std.mem.Allocator) !VM {
         var vm = VM{
             .allocator = allocator,
+            .objects = null,
 
             // This will get set up when calling `interpret()` before doing anything
             .frames = undefined,
@@ -108,6 +110,7 @@ pub const VM = struct {
     pub fn deinit(self: *VM) void {
         self.strings.deinit();
         self.globals.deinit();
+        if (self.objects) |objects| objects.deinit();
     }
 
     pub fn interpret(self: *VM, source: []u8) !InterpretResult {
@@ -316,7 +319,6 @@ pub const VM = struct {
                 @intFromEnum(OpCode.POP) => _ = self.pop(),
                 @intFromEnum(OpCode.SET_UPVALUE) => {
                     const slot = frame.readByte();
-                    // TODO: check
                     frame.closure.upvalues[slot].?.location.* = self.peek(0).*;
                 },
                 @intFromEnum(OpCode.GET_UPVALUE) => {

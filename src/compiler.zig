@@ -798,10 +798,13 @@ const Parser = struct {
 
         while (@intFromEnum(precedence) <= @intFromEnum(getRule(self.current.type).precedence)) {
             self.advance();
-            // TODO: handle null infix?
-            // Happens with `fn add`
-            const infix_rule = getRule(self.previous.type).infix.?;
-            try infix_rule(self, can_assign);
+
+            if (getRule(self.previous.type).infix) |infix_rule| {
+                try infix_rule(self, can_assign);
+            } else {
+                self.err("Unexpected token.");
+                return;
+            }
         }
 
         if (can_assign and self.match(.EQUAL)) {

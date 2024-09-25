@@ -22,26 +22,25 @@ pub const NativeFn = *const fn (arg_count: u8, args: [*]Value) Value;
 
 pub const Obj = struct {
     type: ObjType,
-    // vm: *VM,
+    vm: *VM,
+    next: ?*Obj,
 
-    // TODO: store linked list of objs and deinit them with VM
     pub fn init(vm: *VM, comptime T: type, typ: ObjType) !*Obj {
         const ptr = try vm.allocator.create(T);
         ptr.obj = Obj{
             .type = typ,
-            // .vm = vm,
+            .vm = vm,
+            .next = vm.objects,
         };
+
+        vm.objects = &ptr.obj;
 
         return &ptr.obj;
     }
 
     pub fn print(self: *Obj) void {
-        // TODO: define `print` on all sub-structs, then call `as` with dynamically generated type from enum. then no switch neded
         switch (self.type) {
-            .STRING => {
-                const str = self.as(String);
-                std.debug.print("{s}", .{str.chars});
-            },
+            .STRING => self.as(String).print(),
             .CLOSURE => self.as(Closure).print(),
             .FUNCTION => self.as(Function).print(),
             .NATIVE => self.as(Native).print(),
@@ -50,15 +49,20 @@ pub const Obj = struct {
     }
 
     pub fn deinit(self: *Obj) void {
+        if (self.next) |next| {
+            next.deinit();
+        }
+
         switch (self.type) {
             .STRING => self.as(String).deinit(),
+            .CLOSURE => self.as(Closure).deinit(),
             .FUNCTION => self.as(Function).deinit(),
             .NATIVE => self.as(Native).deinit(),
             .UPVALUE => self.as(Upvalue).deinit(),
         }
     }
 
-    pub fn as(self: *Obj, comptime T: type) *T {
+    pub fn as(self: *Obj, T: type) *T {
         return @alignCast(@fieldParentPtr("obj", self));
     }
 
@@ -78,8 +82,8 @@ pub const Obj = struct {
         }
 
         pub fn deinit(self: *String) void {
-            _ = self;
-            // self.obj.vm.allocator.destroy(self);
+            self.obj.vm.allocator.free(self.chars);
+            self.obj.vm.allocator.destroy(self);
         }
 
         /// Copies the chars to the heap before initialising
@@ -116,6 +120,10 @@ pub const Obj = struct {
 
             return result;
         }
+
+        pub fn print(self: *String) void {
+            std.debug.print("{s}", .{self.chars});
+        }
     };
 
     pub const Closure = struct {
@@ -132,7 +140,6 @@ pub const Obj = struct {
             closure.upvalue_count = function.upvalue_count;
 
             for (0..function.upvalue_count) |i| {
-                // TODO: check if we want null here for the garbage collector?
                 closure.upvalues[i] = null;
             }
 
@@ -216,7 +223,7 @@ pub const Obj = struct {
             return upvalue;
         }
 
-        pub fn deinit(self: *Native) void {
+        pub fn deinit(self: *Upvalue) void {
             self.obj.vm.allocator.destroy(self);
         }
 

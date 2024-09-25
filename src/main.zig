@@ -45,17 +45,13 @@ pub fn main() !void {
     var args = std.process.args();
     _ = args.next();
 
-    // TODO: get rid of arena once sorted objects
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    var arena = std.heap.ArenaAllocator.init(gpa.allocator());
-    defer {
-        arena.deinit();
-        _ = gpa.deinit();
-    }
+    defer _ = gpa.deinit();
 
-    const allocator = arena.allocator();
+    const allocator = gpa.allocator();
 
     var vm = try VM.init(allocator);
+    defer vm.deinit();
 
     if (args.next()) |file_name| {
         if (args.next() != null) {
@@ -65,7 +61,7 @@ pub fn main() !void {
 
         try runFile(&vm, allocator, file_name);
     } else {
-        try runFile(&vm, allocator, "./test.lox");
-        // try repl(&vm);
+        // try runFile(&vm, allocator, "./test.lox");
+        try repl(&vm);
     }
 }
