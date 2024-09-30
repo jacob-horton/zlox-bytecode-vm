@@ -160,6 +160,7 @@ pub const GC = struct {
     fn markCompilerRoots(self: *Self) !void {
         var next: ?*Compiler = if (self.vm.compiler) |comp| comp.parser.current_compiler else null;
         while (next) |compiler| {
+            if (!compiler.is_init_finished) break;
             try self.markObject(&compiler.function.obj);
             next = compiler.enclosing;
         }
@@ -185,11 +186,6 @@ pub const GC = struct {
     }
 
     fn markObject(self: *Self, object: *Obj) !void {
-        if (zlox_common.DEBUG_LOC_GC and @intFromPtr(object) < 1000) {
-            std.debug.print("{x} pre-mark ", .{@intFromPtr(object)});
-            object.print();
-            std.debug.print("\n", .{});
-        }
         if (object.is_marked) return;
 
         if (zlox_common.DEBUG_LOC_GC) {

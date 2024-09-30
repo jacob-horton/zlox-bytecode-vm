@@ -108,6 +108,8 @@ pub const Compiler = struct {
     vm: *VM,
     parser: *Parser,
 
+    is_init_finished: bool,
+
     pub fn init(vm: *VM, enclosing: ?*Compiler, typ: FunctionType) !Compiler {
         var compiler = Compiler{
             .local_count = 0,
@@ -115,6 +117,9 @@ pub const Compiler = struct {
             .locals = undefined,
 
             .upvalues = undefined,
+
+            // For GC so we don't try marking invalid memory addresses
+            .is_init_finished = false,
 
             .function = undefined,
             .type = typ,
@@ -126,8 +131,6 @@ pub const Compiler = struct {
             .parser = undefined,
         };
 
-        compiler.function = try Function.init(vm);
-
         const local = &compiler.locals[compiler.local_count];
         compiler.local_count += 1;
 
@@ -135,6 +138,9 @@ pub const Compiler = struct {
         local.name.start = "";
         local.name.length = 0;
         local.is_captured = false;
+
+        compiler.function = try Function.init(vm);
+        compiler.is_init_finished = true;
 
         return compiler;
     }
