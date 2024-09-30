@@ -22,7 +22,7 @@ pub const Table = struct {
         };
     }
 
-    pub fn deinit(self: *Table) void {
+    pub fn deinit(self: Table) void {
         if (self.entries) |entries| {
             self.allocator.free(entries);
         }

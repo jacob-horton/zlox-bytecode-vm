@@ -1,6 +1,7 @@
 const std = @import("std");
 
 const zlox_chunk = @import("chunk.zig");
+const zlox_common = @import("common.zig");
 const zlox_value = @import("value.zig");
 const zlox_vm = @import("vm.zig");
 
@@ -24,6 +25,7 @@ pub const Obj = struct {
     type: ObjType,
     vm: *VM,
     next: ?*Obj,
+    is_marked: bool,
 
     pub fn init(vm: *VM, comptime T: type, typ: ObjType) !*Obj {
         const ptr = try vm.allocator.create(T);
@@ -31,9 +33,14 @@ pub const Obj = struct {
             .type = typ,
             .vm = vm,
             .next = vm.objects,
+            .is_marked = false,
         };
 
         vm.objects = &ptr.obj;
+
+        if (zlox_common.DEBUG_LOC_GC) {
+            std.debug.print("{*} allocated {d} bytes\n", .{ ptr, @sizeOf(T) });
+        }
 
         return &ptr.obj;
     }
@@ -49,10 +56,6 @@ pub const Obj = struct {
     }
 
     pub fn deinit(self: *Obj) void {
-        if (self.next) |next| {
-            next.deinit();
-        }
-
         switch (self.type) {
             .STRING => self.as(String).deinit(),
             .CLOSURE => self.as(Closure).deinit(),
@@ -60,6 +63,14 @@ pub const Obj = struct {
             .NATIVE => self.as(Native).deinit(),
             .UPVALUE => self.as(Upvalue).deinit(),
         }
+    }
+
+    pub fn deinitAll(self: *Obj) void {
+        if (self.next) |next| {
+            next.deinitAll();
+        }
+
+        self.deinit();
     }
 
     pub fn as(self: *Obj, T: type) *T {
@@ -76,12 +87,19 @@ pub const Obj = struct {
 
             str.chars = chars;
             str.hash = str_hash;
+
+            vm.push(Value{ .obj = &str.obj });
             _ = try vm.strings.set(str, .nil);
+            _ = vm.pop();
 
             return str;
         }
 
         pub fn deinit(self: *String) void {
+            if (zlox_common.DEBUG_LOC_GC) {
+                std.debug.print("{*} freed\n", .{self});
+            }
+
             self.obj.vm.allocator.free(self.chars);
             self.obj.vm.allocator.destroy(self);
         }
@@ -147,6 +165,10 @@ pub const Obj = struct {
         }
 
         pub fn deinit(self: *Closure) void {
+            if (zlox_common.DEBUG_LOC_GC) {
+                std.debug.print("{*} freed\n", .{self});
+            }
+
             self.obj.vm.allocator.free(self.upvalues);
             self.obj.vm.allocator.destroy(self);
         }
@@ -174,6 +196,10 @@ pub const Obj = struct {
         }
 
         pub fn deinit(self: *Function) void {
+            if (zlox_common.DEBUG_LOC_GC) {
+                std.debug.print("{*} freed\n", .{self});
+            }
+
             self.chunk.deinit();
             self.obj.vm.allocator.destroy(self);
         }
@@ -199,6 +225,10 @@ pub const Obj = struct {
         }
 
         pub fn deinit(self: *Native) void {
+            if (zlox_common.DEBUG_LOC_GC) {
+                std.debug.print("{*} freed\n", .{self});
+            }
+
             self.obj.vm.allocator.destroy(self);
         }
 
@@ -224,6 +254,10 @@ pub const Obj = struct {
         }
 
         pub fn deinit(self: *Upvalue) void {
+            if (zlox_common.DEBUG_LOC_GC) {
+                std.debug.print("{*} freed\n", .{self});
+            }
+
             self.obj.vm.allocator.destroy(self);
         }
 

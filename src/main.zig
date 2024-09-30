@@ -1,13 +1,10 @@
 const std = @import("std");
 
 const zlox_chunk = @import("chunk.zig");
-const zlox_gc = @import("gc.zig");
 const zlox_vm = @import("vm.zig");
 
 const Chunk = zlox_chunk.Chunk;
 const OpCode = zlox_chunk.OpCode;
-
-const GC = zlox_gc.GC;
 
 const VM = zlox_vm.VM;
 
@@ -16,10 +13,10 @@ fn repl(vm: *VM) !void {
     const stdin = std.io.getStdIn().reader();
 
     while (true) {
-        std.debug.print("> ", .{});
+        std.debug.print("\n> ", .{});
 
         const line = (stdin.readUntilDelimiter(&input, '\n')) catch {
-            std.debug.print("\n", .{});
+            std.debug.print("\n\n", .{});
             return;
         };
 
@@ -49,15 +46,15 @@ pub fn main() !void {
     _ = args.next();
 
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
 
-    var gc = GC.init(gpa.allocator());
-    defer gc.deinit();
+    var vm = VM.init();
+    try vm.setupAllocator(allocator);
 
-    const allocator = gc.allocator();
-
-    var vm = try VM.init(allocator);
-    defer vm.deinit();
+    defer {
+        vm.deinit();
+        _ = gpa.deinit();
+    }
 
     if (args.next()) |file_name| {
         if (args.next() != null) {
@@ -67,7 +64,7 @@ pub fn main() !void {
 
         try runFile(&vm, allocator, file_name);
     } else {
-        // try runFile(&vm, allocator, "./test.lox");
-        try repl(&vm);
+        try runFile(&vm, allocator, "./test.lox");
+        // try repl(&vm);
     }
 }

@@ -4,15 +4,17 @@ const zlox_chunk = @import("chunk.zig");
 const zlox_common = @import("common.zig");
 const zlox_compiler = @import("compiler.zig");
 const zlox_debug = @import("debug.zig");
+const zlox_gc = @import("gc.zig");
 const zlox_native = @import("native.zig");
 const zlox_object = @import("object.zig");
 const zlox_table = @import("table.zig");
 const zlox_value = @import("value.zig");
 
-const Chunk = zlox_chunk.Chunk;
 const OpCode = zlox_chunk.OpCode;
 
 const Compiler = zlox_compiler.Compiler;
+
+const GC = zlox_gc.GC;
 
 const Obj = zlox_object.Obj;
 const String = zlox_object.Obj.String;
@@ -82,13 +84,20 @@ pub const VM = struct {
     open_upvalues: ?*Upvalue,
     globals: Table,
 
+    gc: GC,
     allocator: std.mem.Allocator,
     objects: ?*Obj,
 
-    pub fn init(allocator: std.mem.Allocator) !VM {
-        var vm = VM{
-            .allocator = allocator,
+    // Needed for GC
+    compiler: ?*Compiler,
+
+    pub fn init() VM {
+        return VM{
+            .gc = undefined,
+            .allocator = undefined,
             .objects = null,
+
+            .compiler = null,
 
             // This will get set up when calling `interpret()` before doing anything
             .frames = undefined,
@@ -98,25 +107,36 @@ pub const VM = struct {
             .stack = undefined,
             .stack_top = 0,
 
-            .strings = Table.init(allocator),
+            .strings = undefined,
             .open_upvalues = null,
-            .globals = Table.init(allocator),
+            .globals = undefined,
         };
-
-        try vm.defineNative("clock", &zlox_native.clock);
-        return vm;
     }
 
-    pub fn deinit(self: *VM) void {
+    pub fn setupAllocator(self: *VM, backing_allocator: std.mem.Allocator) !void {
+        self.gc = GC.init(self, backing_allocator);
+
+        self.allocator = self.gc.allocator();
+        self.strings = Table.init(self.allocator);
+        self.globals = Table.init(self.allocator);
+
+        try self.defineNative("clock", &zlox_native.clock);
+    }
+
+    pub fn deinit(self: VM) void {
         self.strings.deinit();
         self.globals.deinit();
-        if (self.objects) |objects| objects.deinit();
+        if (self.objects) |objects| objects.deinitAll();
+
+        self.gc.deinit();
     }
 
     pub fn interpret(self: *VM, source: []u8) !InterpretResult {
         var compiler = try Compiler.init(self, null, .SCRIPT);
+        self.compiler = &compiler;
 
         const result = compiler.compile(source) catch null;
+
         if (result) |function| {
             self.push(Value{ .obj = &function.obj });
             const closure = try Closure.init(self, function);
@@ -131,12 +151,12 @@ pub const VM = struct {
         }
     }
 
-    fn push(self: *VM, value: Value) void {
+    pub fn push(self: *VM, value: Value) void {
         self.stack[self.stack_top] = value;
         self.stack_top += 1;
     }
 
-    fn pop(self: *VM) Value {
+    pub fn pop(self: *VM) Value {
         self.stack_top -= 1;
         return self.stack[self.stack_top];
     }
@@ -186,14 +206,21 @@ pub const VM = struct {
     }
 
     fn binaryOp(self: *VM, op: fn (vm: *VM, a: Value, b: Value) OperationError!Value) RuntimeError!void {
-        const b = self.pop();
-        const a = self.pop();
-        self.push(op(self, a, b) catch |err| switch (err) {
+        // Peek so we don't take off stack for gc (only needed for concat)
+        const b = self.peek(0);
+        const a = self.peek(1);
+
+        const new_value = op(self, a.*, b.*) catch |err| switch (err) {
             OperationError.ExpectBothNumeric => return RuntimeError.ExpectBothOperandsNumeric,
             OperationError.ExpectBothString => return RuntimeError.ExpectBothOperandsString,
             OperationError.ExpectBothStringOrBothNumeric => return RuntimeError.ExpectBothOperandsStringOrBothNumeric,
             OperationError.ConcatenationError => return RuntimeError.ConcatenationError,
-        });
+        };
+
+        _ = self.pop();
+        _ = self.pop();
+
+        self.push(new_value);
     }
 
     fn defineNative(self: *VM, name: []const u8, function: NativeFn) !void {
@@ -424,7 +451,6 @@ pub const VM = struct {
                         return .OK;
                     }
 
-                    // std.debug.print("{d} {d}\n", .{ @intFromPtr(frame.slots), @intFromPtr(&self.stack) });
                     self.stack_top = zlox_common.ptrOffset(Value, &self.stack, frame.slots);
                     self.push(result);
                     frame = &self.frames[self.frame_count - 1];
