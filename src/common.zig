@@ -1,9 +1,9 @@
 const std = @import("std");
 
-pub const DEBUG_TRACE_EXECUTION = true;
-pub const DEBUG_PRINT_CODE = true;
+pub const DEBUG_TRACE_EXECUTION = false;
+pub const DEBUG_PRINT_CODE = false;
 pub const DEBUG_STRESS_GC = false;
-pub const DEBUG_LOC_GC = true;
+pub const DEBUG_LOC_GC = false;
 
 pub const U8_COUNT: u9 = std.math.maxInt(u8) + 1;
 

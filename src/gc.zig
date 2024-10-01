@@ -15,6 +15,7 @@ const Function = zlox_object.Obj.Function;
 const Closure = zlox_object.Obj.Closure;
 const Class = zlox_object.Obj.Class;
 const Instance = zlox_object.Obj.Instance;
+const BoundMethod = zlox_object.Obj.BoundMethod;
 
 const Table = zlox_table.Table;
 
@@ -128,7 +129,16 @@ pub const GC = struct {
                 try self.markObject(&instance.class.obj);
                 try self.markTable(&instance.fields);
             },
-            .CLASS => try self.markObject(&obj.as(Class).name.obj),
+            .CLASS => {
+                const class = obj.as(Class);
+                try self.markObject(&class.name.obj);
+                try self.markTable(&class.methods);
+            },
+            .BOUND_METHOD => {
+                const bound = obj.as(BoundMethod);
+                try self.markValue(bound.receiver);
+                try self.markObject(&bound.method.obj);
+            },
             .UPVALUE => try self.markValue(obj.as(Upvalue).closed),
             .FUNCTION => {
                 const function = obj.as(Function);
@@ -163,6 +173,7 @@ pub const GC = struct {
 
         try self.markTable(&self.vm.globals);
         try self.markCompilerRoots();
+        if (self.vm.init_string) |init_string| try self.markObject(&init_string.obj);
     }
 
     fn markCompilerRoots(self: *Self) !void {

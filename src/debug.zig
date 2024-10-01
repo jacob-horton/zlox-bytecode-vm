@@ -84,6 +84,7 @@ pub fn disassembleInstruction(chunk: *Chunk, offset: usize, prev_offset: usize) 
         @intFromEnum(OpCode.NOT) => return simpleInstruction(instruction, offset),
         @intFromEnum(OpCode.CONSTANT) => return constantInstruction(instruction, chunk, offset),
         @intFromEnum(OpCode.CLASS) => return constantInstruction(instruction, chunk, offset),
+        @intFromEnum(OpCode.METHOD) => return constantInstruction(instruction, chunk, offset),
         else => {
             std.debug.print("Unknown opcode {d}\n", .{instruction});
             return offset + 1;

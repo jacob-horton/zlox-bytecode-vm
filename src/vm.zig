@@ -25,6 +25,7 @@ const NativeFn = zlox_object.NativeFn;
 const Upvalue = zlox_object.Obj.Upvalue;
 const Class = zlox_object.Obj.Class;
 const Instance = zlox_object.Obj.Instance;
+const BoundMethod = zlox_object.Obj.BoundMethod;
 
 const Table = zlox_table.Table;
 
@@ -93,12 +94,18 @@ pub const VM = struct {
     // Needed for GC
     compiler: ?*Compiler,
 
+    init_string: ?*String,
+
     pub fn init() VM {
         return VM{
+            // These are defined in `setupAllocator`, which must be called after `init`
             .gc = undefined,
             .allocator = undefined,
-            .objects = null,
+            .globals = undefined,
+            .strings = undefined,
+            .init_string = null,
 
+            .objects = null,
             .compiler = null,
 
             // This will get set up when calling `interpret()` before doing anything
@@ -109,9 +116,7 @@ pub const VM = struct {
             .stack = undefined,
             .stack_top = 0,
 
-            .strings = undefined,
             .open_upvalues = null,
-            .globals = undefined,
         };
     }
 
@@ -121,13 +126,15 @@ pub const VM = struct {
         self.allocator = self.gc.allocator();
         self.strings = Table.init(self.allocator);
         self.globals = Table.init(self.allocator);
+        self.init_string = try String.copyInit(self, "init", 4);
 
         try self.defineNative("clock", &zlox_native.clock);
     }
 
-    pub fn deinit(self: VM) void {
+    pub fn deinit(self: *VM) void {
         self.strings.deinit();
         self.globals.deinit();
+        self.init_string = null;
         if (self.objects) |objects| objects.deinitAll();
 
         self.gc.deinit();
@@ -246,9 +253,22 @@ pub const VM = struct {
                         const instance = try Instance.init(self, class);
                         self.stack[self.stack_top - arg_count - 1] = Value{ .obj = &instance.obj };
 
+                        var initialiser: Value = undefined;
+                        if (class.methods.get(self.init_string.?, &initialiser)) {
+                            return self.call(initialiser.obj.as(Closure), arg_count);
+                        } else if (arg_count != 0) {
+                            _ = self.runtimeError("Expected 0 arguments but got {d}", .{arg_count});
+                            return false;
+                        }
+
                         return true;
                     },
                     .CLOSURE => return self.call(obj.as(Closure), arg_count),
+                    .BOUND_METHOD => {
+                        const bound = obj.as(BoundMethod);
+                        self.stack[self.stack_top - arg_count - 1] = bound.receiver;
+                        return self.call(bound.method, arg_count);
+                    },
                     .NATIVE => {
                         const native = obj.as(Native);
                         const result = native.function(arg_count, @as([*]Value, &self.stack) + self.stack_top - arg_count);
@@ -321,6 +341,28 @@ pub const VM = struct {
             upvalue.location = &upvalue.closed;
             self.open_upvalues = upvalue.next;
         }
+    }
+
+    fn defineMethod(self: *VM, name: *String) !void {
+        const method = self.peek(0).*;
+        const class = self.peek(1).obj.as(Class);
+        _ = try class.methods.set(name, method);
+        _ = self.pop();
+    }
+
+    fn bindMethod(self: *VM, class: *Class, name: *String) !bool {
+        var method: Value = undefined;
+
+        if (!class.methods.get(name, &method)) {
+            _ = self.runtimeError("Undefined property '{s}'", .{name.chars});
+            return false;
+        }
+
+        const bound = try BoundMethod.init(self, self.peek(0).*, method.obj.as(Closure));
+
+        _ = self.pop();
+        self.push(Value{ .obj = &bound.obj });
+        return true;
     }
 
     fn run(self: *VM) !InterpretResult {
@@ -399,12 +441,15 @@ pub const VM = struct {
                     const instance = instance_val.obj.as(Instance);
                     const name = frame.readString();
 
+                    // NOTE: fields always shadow methods
                     var value: Value = undefined;
                     if (instance.fields.get(name, &value)) {
-                        _ = self.pop();
+                        _ = self.pop(); // Pop instance
                         self.push(value);
                     } else {
-                        return self.runtimeError("Undefined property '{s}'", .{name.chars});
+                        if (!try self.bindMethod(instance.class, name)) {
+                            return self.runtimeError("Undefined property '{s}'", .{name.chars});
+                        }
                     }
                 },
                 @intFromEnum(OpCode.SET_PROPERTY) => {
@@ -498,6 +543,7 @@ pub const VM = struct {
                     const class = try Class.init(self, frame.readString());
                     self.push(Value{ .obj = &class.obj });
                 },
+                @intFromEnum(OpCode.METHOD) => try self.defineMethod(frame.readString()),
                 else => {
                     std.debug.print("Unknown opcode {d}\n", .{instruction});
                     return .COMPILE_ERROR;

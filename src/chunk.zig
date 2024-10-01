@@ -38,6 +38,7 @@ pub const OpCode = enum(u8) {
     CLOSURE,
     RETURN,
     CLASS,
+    METHOD,
 };
 
 const RleItem = struct {

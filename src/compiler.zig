@@ -24,6 +24,8 @@ const VM = zlox_vm.VM;
 
 pub const FunctionType = enum {
     FUNCTION,
+    METHOD,
+    INITIALISER,
     SCRIPT,
 };
 
@@ -76,6 +78,7 @@ const rules = blk: {
     _rules[@intFromEnum(TokenType.TRUE)] = ParseRule{ .prefix = Parser.literal };
     _rules[@intFromEnum(TokenType.NIL)] = ParseRule{ .prefix = Parser.literal };
     _rules[@intFromEnum(TokenType.DOT)] = ParseRule{ .infix = Parser.dot, .precedence = .CALL };
+    _rules[@intFromEnum(TokenType.THIS)] = ParseRule{ .prefix = Parser.this };
 
     break :blk _rules;
 };
@@ -93,6 +96,10 @@ pub const Local = struct {
 pub const Upvalue = struct {
     index: u8,
     is_local: bool,
+};
+
+const ClassCompiler = struct {
+    enclosing: ?*ClassCompiler,
 };
 
 pub const Compiler = struct {
@@ -136,9 +143,14 @@ pub const Compiler = struct {
         compiler.local_count += 1;
 
         local.depth = 0;
-        local.name.start = "";
-        local.name.length = 0;
         local.is_captured = false;
+        if (typ != .FUNCTION) {
+            local.name.start = "this";
+            local.name.length = 4;
+        } else {
+            local.name.start = "";
+            local.name.length = 0;
+        }
 
         compiler.function = try Function.init(vm);
         compiler.is_init_finished = true;
@@ -180,6 +192,8 @@ const Parser = struct {
     current_compiler: ?*Compiler,
     vm: *VM,
 
+    current_class: ?*ClassCompiler,
+
     pub fn init(vm: *VM, compiler: *Compiler, scanner: Scanner) Parser {
         var parser = Parser{
             .had_error = false,
@@ -188,6 +202,8 @@ const Parser = struct {
             // These will get set up when we `advance()`
             .previous = undefined,
             .current = undefined,
+
+            .current_class = null,
 
             .vm = vm,
             .scanner = scanner,
@@ -230,14 +246,40 @@ const Parser = struct {
 
     fn classDeclaration(self: *Parser) !void {
         self.consume(.IDENTIFIER, "Expect class name.");
+        const class_name = self.previous;
+
         const nameConstant = try self.identifierConstant(&self.previous);
         self.declareVariable();
 
         try self.emitBytes(@intFromEnum(OpCode.CLASS), nameConstant);
         try self.defineVariable(nameConstant);
 
+        var class_compiler = ClassCompiler{ .enclosing = self.current_class };
+        self.current_class = &class_compiler;
+
+        try self.namedVariable(class_name, false);
         self.consume(.LEFT_BRACE, "Expect '{' before class body.");
+
+        while (!self.check(.RIGHT_BRACE) and !self.check(.EOF)) {
+            try self.method();
+        }
+
         self.consume(.RIGHT_BRACE, "Expect '}' after class body.");
+        try self.emitByte(@intFromEnum(OpCode.POP)); // Remove class variable name from stack
+
+        self.current_class = self.current_class.?.enclosing;
+    }
+
+    fn method(self: *Parser) !void {
+        self.consume(.IDENTIFIER, "Expect method name.");
+        const constant = try self.identifierConstant(&self.previous);
+
+        var typ: FunctionType = .METHOD;
+        if (std.mem.eql(u8, self.previous.start[0..self.previous.length], "init"))
+            typ = .INITIALISER;
+
+        try self.function(typ);
+        try self.emitBytes(@intFromEnum(OpCode.METHOD), constant);
     }
 
     fn funDeclaration(self: *Parser) !void {
@@ -436,6 +478,10 @@ const Parser = struct {
         if (self.match(.SEMICOLON)) {
             try self.emitReturn();
         } else {
+            if (self.current_compiler.?.type == .SCRIPT) {
+                self.err("Can't return a value from an initialiser.");
+            }
+
             try self.expression();
             self.consume(.SEMICOLON, "Expect ';' after return value.");
             try self.emitByte(@intFromEnum(OpCode.RETURN));
@@ -647,6 +693,15 @@ const Parser = struct {
 
     fn variable(self: *Parser, can_assign: bool) !void {
         try self.namedVariable(self.previous, can_assign);
+    }
+
+    fn this(self: *Parser, _: bool) !void {
+        if (self.current_class == null) {
+            self.err("Can't use 'this' outisde of a class.");
+            return;
+        }
+
+        try self.variable(false);
     }
 
     fn namedVariable(self: *Parser, name: Token, can_assign: bool) !void {
@@ -901,7 +956,13 @@ const Parser = struct {
     }
 
     fn emitReturn(self: *Parser) !void {
-        try self.emitByte(@intFromEnum(OpCode.NIL));
+        if (self.current_compiler.?.type == .INITIALISER) {
+            // Return `this` if initialiser
+            try self.emitBytes(@intFromEnum(OpCode.GET_LOCAL), 0);
+        } else {
+            try self.emitByte(@intFromEnum(OpCode.NIL));
+        }
+
         try self.emitByte(@intFromEnum(OpCode.RETURN));
     }
 

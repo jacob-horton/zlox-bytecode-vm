@@ -22,6 +22,7 @@ pub const ObjType = enum {
     UPVALUE,
     CLASS,
     INSTANCE,
+    BOUND_METHOD,
 };
 
 pub const NativeFn = *const fn (arg_count: u8, args: [*]Value) Value;
@@ -59,6 +60,7 @@ pub const Obj = struct {
             .UPVALUE => self.as(Upvalue).print(),
             .CLASS => self.as(Class).print(),
             .INSTANCE => self.as(Instance).print(),
+            .BOUND_METHOD => self.as(BoundMethod).print(),
         }
     }
 
@@ -71,6 +73,7 @@ pub const Obj = struct {
             .UPVALUE => self.as(Upvalue).deinit(),
             .CLASS => self.as(Class).deinit(),
             .INSTANCE => self.as(Instance).deinit(),
+            .BOUND_METHOD => self.as(BoundMethod).deinit(),
         }
     }
 
@@ -278,11 +281,13 @@ pub const Obj = struct {
     pub const Class = struct {
         obj: Obj,
         name: *String,
+        methods: Table,
 
         /// Does not own name
         pub fn init(vm: *VM, name: *String) !*Class {
             const class = (try Obj.init(vm, Class, .CLASS)).as(Class);
             class.name = name;
+            class.methods = Table.init(vm.allocator);
 
             return class;
         }
@@ -292,6 +297,7 @@ pub const Obj = struct {
                 std.debug.print("{*} freed\n", .{self});
             }
 
+            self.methods.deinit();
             self.obj.vm.allocator.destroy(self);
         }
 
@@ -325,6 +331,33 @@ pub const Obj = struct {
 
         pub fn print(self: Instance) void {
             std.debug.print("{s} instance", .{self.class.name.chars});
+        }
+    };
+
+    pub const BoundMethod = struct {
+        obj: Obj,
+        receiver: Value,
+        method: *Closure,
+
+        /// Does not own method
+        pub fn init(vm: *VM, receiver: Value, method: *Closure) !*BoundMethod {
+            const bound = (try Obj.init(vm, BoundMethod, .BOUND_METHOD)).as(BoundMethod);
+            bound.receiver = receiver;
+            bound.method = method;
+
+            return bound;
+        }
+
+        pub fn deinit(self: *BoundMethod) void {
+            if (zlox_common.DEBUG_LOC_GC) {
+                std.debug.print("{*} freed\n", .{self});
+            }
+
+            self.obj.vm.allocator.destroy(self);
+        }
+
+        pub fn print(self: BoundMethod) void {
+            self.method.function.print();
         }
     };
 };
