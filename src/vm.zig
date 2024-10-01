@@ -23,6 +23,8 @@ const Function = zlox_object.Obj.Function;
 const Native = zlox_object.Obj.Native;
 const NativeFn = zlox_object.NativeFn;
 const Upvalue = zlox_object.Obj.Upvalue;
+const Class = zlox_object.Obj.Class;
+const Instance = zlox_object.Obj.Instance;
 
 const Table = zlox_table.Table;
 
@@ -235,10 +237,17 @@ pub const VM = struct {
         _ = self.pop();
     }
 
-    fn callValue(self: *VM, callee: Value, arg_count: u8) bool {
+    fn callValue(self: *VM, callee: Value, arg_count: u8) !bool {
         switch (callee) {
             .obj => |obj| {
                 switch (obj.type) {
+                    .CLASS => {
+                        const class = obj.as(Class);
+                        const instance = try Instance.init(self, class);
+                        self.stack[self.stack_top - arg_count - 1] = Value{ .obj = &instance.obj };
+
+                        return true;
+                    },
                     .CLOSURE => return self.call(obj.as(Closure), arg_count),
                     .NATIVE => {
                         const native = obj.as(Native);
@@ -381,6 +390,36 @@ pub const VM = struct {
                     _ = try self.globals.set(name, self.peek(0).*);
                     _ = self.pop();
                 },
+                @intFromEnum(OpCode.GET_PROPERTY) => {
+                    const instance_val = self.peek(0);
+                    if (instance_val.* != .obj or instance_val.obj.type != .INSTANCE) {
+                        return self.runtimeError("Only instances have properties", .{});
+                    }
+
+                    const instance = instance_val.obj.as(Instance);
+                    const name = frame.readString();
+
+                    var value: Value = undefined;
+                    if (instance.fields.get(name, &value)) {
+                        _ = self.pop();
+                        self.push(value);
+                    } else {
+                        return self.runtimeError("Undefined property '{s}'", .{name.chars});
+                    }
+                },
+                @intFromEnum(OpCode.SET_PROPERTY) => {
+                    const instance_val = self.peek(1);
+                    if (instance_val.* != .obj or instance_val.obj.type != .INSTANCE) {
+                        return self.runtimeError("Only instances have fields", .{});
+                    }
+
+                    const instance = instance_val.obj.as(Instance);
+                    _ = try instance.fields.set(frame.readString(), self.peek(0).*);
+
+                    const value = self.pop();
+                    _ = self.pop();
+                    self.push(value);
+                },
                 @intFromEnum(OpCode.EQUAL) => {
                     const b = self.pop();
                     const a = self.pop();
@@ -417,7 +456,7 @@ pub const VM = struct {
                 },
                 @intFromEnum(OpCode.CALL) => {
                     const arg_count = frame.readByte();
-                    if (!self.callValue(self.peek(arg_count).*, arg_count)) {
+                    if (!try self.callValue(self.peek(arg_count).*, arg_count)) {
                         return .RUNTIME_ERROR;
                     }
                     frame = &self.frames[self.frame_count - 1];
@@ -454,6 +493,10 @@ pub const VM = struct {
                     self.stack_top = zlox_common.ptrOffset(Value, &self.stack, frame.slots);
                     self.push(result);
                     frame = &self.frames[self.frame_count - 1];
+                },
+                @intFromEnum(OpCode.CLASS) => {
+                    const class = try Class.init(self, frame.readString());
+                    self.push(Value{ .obj = &class.obj });
                 },
                 else => {
                     std.debug.print("Unknown opcode {d}\n", .{instruction});

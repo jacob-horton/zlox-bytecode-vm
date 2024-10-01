@@ -18,6 +18,8 @@ pub const OpCode = enum(u8) {
     GET_GLOBAL,
     SET_LOCAL,
     GET_LOCAL,
+    SET_PROPERTY,
+    GET_PROPERTY,
     DEFINE_GLOBAL,
     EQUAL,
     GREATER,
@@ -35,6 +37,7 @@ pub const OpCode = enum(u8) {
     CALL,
     CLOSURE,
     RETURN,
+    CLASS,
 };
 
 const RleItem = struct {

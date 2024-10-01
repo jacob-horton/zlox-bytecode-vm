@@ -70,11 +70,12 @@ const rules = blk: {
     _rules[@intFromEnum(TokenType.STAR)] = ParseRule{ .infix = Parser.binary, .precedence = .FACTOR };
     _rules[@intFromEnum(TokenType.STRING)] = ParseRule{ .prefix = Parser.string };
     _rules[@intFromEnum(TokenType.NUMBER)] = ParseRule{ .prefix = Parser.number };
-    _rules[@intFromEnum(TokenType.AND)] = ParseRule{ .infix = Parser.and_, .precedence = Precedence.AND };
-    _rules[@intFromEnum(TokenType.OR)] = ParseRule{ .infix = Parser.or_, .precedence = Precedence.OR };
+    _rules[@intFromEnum(TokenType.AND)] = ParseRule{ .infix = Parser.and_, .precedence = .AND };
+    _rules[@intFromEnum(TokenType.OR)] = ParseRule{ .infix = Parser.or_, .precedence = .OR };
     _rules[@intFromEnum(TokenType.FALSE)] = ParseRule{ .prefix = Parser.literal };
     _rules[@intFromEnum(TokenType.TRUE)] = ParseRule{ .prefix = Parser.literal };
     _rules[@intFromEnum(TokenType.NIL)] = ParseRule{ .prefix = Parser.literal };
+    _rules[@intFromEnum(TokenType.DOT)] = ParseRule{ .infix = Parser.dot, .precedence = .CALL };
 
     break :blk _rules;
 };
@@ -218,11 +219,25 @@ const Parser = struct {
             try self.varDeclaration();
         } else if (self.match(.FUN)) {
             try self.funDeclaration();
+        } else if (self.match(.CLASS)) {
+            try self.classDeclaration();
         } else {
             try self.statement();
         }
 
         if (self.panic_mode) self.synchronise();
+    }
+
+    fn classDeclaration(self: *Parser) !void {
+        self.consume(.IDENTIFIER, "Expect class name.");
+        const nameConstant = try self.identifierConstant(&self.previous);
+        self.declareVariable();
+
+        try self.emitBytes(@intFromEnum(OpCode.CLASS), nameConstant);
+        try self.defineVariable(nameConstant);
+
+        self.consume(.LEFT_BRACE, "Expect '{' before class body.");
+        self.consume(.RIGHT_BRACE, "Expect '}' after class body.");
     }
 
     fn funDeclaration(self: *Parser) !void {
@@ -344,7 +359,7 @@ const Parser = struct {
             }
 
             if (Token.identifiersEqual(name, &local.name)) {
-                self.err("Already a variabel with this name in scope.");
+                self.err("Already a variable with this name in scope.");
             }
         }
 
@@ -763,6 +778,18 @@ const Parser = struct {
     fn call(self: *Parser, _: bool) !void {
         const arg_count = try self.argumentList();
         try self.emitBytes(@intFromEnum(OpCode.CALL), arg_count);
+    }
+
+    fn dot(self: *Parser, can_assign: bool) !void {
+        self.consume(.IDENTIFIER, "Expect property name after '.'.");
+        const name = try self.identifierConstant(&self.previous);
+
+        if (can_assign and self.match(.EQUAL)) {
+            try self.expression();
+            try self.emitBytes(@intFromEnum(OpCode.SET_PROPERTY), name);
+        } else {
+            try self.emitBytes(@intFromEnum(OpCode.GET_PROPERTY), name);
+        }
     }
 
     fn argumentList(self: *Parser) !u8 {

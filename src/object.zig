@@ -2,10 +2,13 @@ const std = @import("std");
 
 const zlox_chunk = @import("chunk.zig");
 const zlox_common = @import("common.zig");
+const zlox_table = @import("table.zig");
 const zlox_value = @import("value.zig");
 const zlox_vm = @import("vm.zig");
 
 const Chunk = zlox_chunk.Chunk;
+
+const Table = zlox_table.Table;
 
 const Value = zlox_value.Value;
 
@@ -17,6 +20,8 @@ pub const ObjType = enum {
     FUNCTION,
     NATIVE,
     UPVALUE,
+    CLASS,
+    INSTANCE,
 };
 
 pub const NativeFn = *const fn (arg_count: u8, args: [*]Value) Value;
@@ -52,6 +57,8 @@ pub const Obj = struct {
             .FUNCTION => self.as(Function).print(),
             .NATIVE => self.as(Native).print(),
             .UPVALUE => self.as(Upvalue).print(),
+            .CLASS => self.as(Class).print(),
+            .INSTANCE => self.as(Instance).print(),
         }
     }
 
@@ -62,6 +69,8 @@ pub const Obj = struct {
             .FUNCTION => self.as(Function).deinit(),
             .NATIVE => self.as(Native).deinit(),
             .UPVALUE => self.as(Upvalue).deinit(),
+            .CLASS => self.as(Class).deinit(),
+            .INSTANCE => self.as(Instance).deinit(),
         }
     }
 
@@ -139,7 +148,7 @@ pub const Obj = struct {
             return result;
         }
 
-        pub fn print(self: *String) void {
+        pub fn print(self: String) void {
             std.debug.print("{s}", .{self.chars});
         }
     };
@@ -173,7 +182,7 @@ pub const Obj = struct {
             self.obj.vm.allocator.destroy(self);
         }
 
-        pub fn print(self: *Closure) void {
+        pub fn print(self: Closure) void {
             self.function.print();
         }
     };
@@ -204,7 +213,7 @@ pub const Obj = struct {
             self.obj.vm.allocator.destroy(self);
         }
 
-        pub fn print(self: *Function) void {
+        pub fn print(self: Function) void {
             if (self.name) |name| {
                 std.debug.print("<fn {s}>", .{name.chars});
             } else {
@@ -232,7 +241,7 @@ pub const Obj = struct {
             self.obj.vm.allocator.destroy(self);
         }
 
-        pub fn print(_: *Native) void {
+        pub fn print(_: Native) void {
             std.debug.print("<native fn>", .{});
         }
     };
@@ -263,6 +272,59 @@ pub const Obj = struct {
 
         pub fn print(_: Upvalue) void {
             std.debug.print("upvalue", .{});
+        }
+    };
+
+    pub const Class = struct {
+        obj: Obj,
+        name: *String,
+
+        /// Does not own name
+        pub fn init(vm: *VM, name: *String) !*Class {
+            const class = (try Obj.init(vm, Class, .CLASS)).as(Class);
+            class.name = name;
+
+            return class;
+        }
+
+        pub fn deinit(self: *Class) void {
+            if (zlox_common.DEBUG_LOC_GC) {
+                std.debug.print("{*} freed\n", .{self});
+            }
+
+            self.obj.vm.allocator.destroy(self);
+        }
+
+        pub fn print(self: Class) void {
+            std.debug.print("{s}", .{self.name.chars});
+        }
+    };
+
+    pub const Instance = struct {
+        obj: Obj,
+        class: *Class,
+        fields: Table,
+
+        /// Does not own class
+        pub fn init(vm: *VM, class: *Class) !*Instance {
+            const instance = (try Obj.init(vm, Instance, .INSTANCE)).as(Instance);
+            instance.class = class;
+            instance.fields = Table.init(vm.allocator);
+
+            return instance;
+        }
+
+        pub fn deinit(self: *Instance) void {
+            if (zlox_common.DEBUG_LOC_GC) {
+                std.debug.print("{*} freed\n", .{self});
+            }
+
+            self.fields.deinit(); // NOTE: does not free entries - they may be referenced elsewhere. GC will handle
+            self.obj.vm.allocator.destroy(self);
+        }
+
+        pub fn print(self: Instance) void {
+            std.debug.print("{s} instance", .{self.class.name.chars});
         }
     };
 };

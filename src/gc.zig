@@ -13,6 +13,8 @@ const Obj = zlox_object.Obj;
 const Upvalue = zlox_object.Obj.Upvalue;
 const Function = zlox_object.Obj.Function;
 const Closure = zlox_object.Obj.Closure;
+const Class = zlox_object.Obj.Class;
+const Instance = zlox_object.Obj.Instance;
 
 const Table = zlox_table.Table;
 
@@ -121,6 +123,12 @@ pub const GC = struct {
 
         switch (obj.type) {
             .NATIVE, .STRING => {},
+            .INSTANCE => {
+                const instance = obj.as(Instance);
+                try self.markObject(&instance.class.obj);
+                try self.markTable(&instance.fields);
+            },
+            .CLASS => try self.markObject(&obj.as(Class).name.obj),
             .UPVALUE => try self.markValue(obj.as(Upvalue).closed),
             .FUNCTION => {
                 const function = obj.as(Function);

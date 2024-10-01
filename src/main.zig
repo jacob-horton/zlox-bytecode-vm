@@ -64,7 +64,7 @@ pub fn main() !void {
 
         try runFile(&vm, allocator, file_name);
     } else {
-        try runFile(&vm, allocator, "./test.lox");
-        // try repl(&vm);
+        // try runFile(&vm, allocator, "./test.lox");
+        try repl(&vm);
     }
 }
