@@ -39,6 +39,7 @@ pub const OpCode = enum(u8) {
     RETURN,
     CLASS,
     METHOD,
+    INVOKE,
 };
 
 const RleItem = struct {

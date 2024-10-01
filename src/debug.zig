@@ -85,6 +85,7 @@ pub fn disassembleInstruction(chunk: *Chunk, offset: usize, prev_offset: usize) 
         @intFromEnum(OpCode.CONSTANT) => return constantInstruction(instruction, chunk, offset),
         @intFromEnum(OpCode.CLASS) => return constantInstruction(instruction, chunk, offset),
         @intFromEnum(OpCode.METHOD) => return constantInstruction(instruction, chunk, offset),
+        @intFromEnum(OpCode.INVOKE) => return invokeInstruction(instruction, chunk, offset),
         else => {
             std.debug.print("Unknown opcode {d}\n", .{instruction});
             return offset + 1;
@@ -101,6 +102,21 @@ fn constantInstruction(instruction: u8, chunk: *Chunk, offset: usize) usize {
     if (offset + 1 >= chunk.code.items.len) constant = chunk.code.items[offset + 1];
 
     std.debug.print("{s:<16} {d:4} '", .{ getInstructionName(instruction), constant });
+
+    if (constant >= 0) chunk.constants.items[@intCast(constant)].print();
+    std.debug.print("'\n", .{});
+
+    return offset + 2;
+}
+
+fn invokeInstruction(instruction: u8, chunk: *Chunk, offset: usize) usize {
+    var constant: isize = -1;
+    if (offset + 1 >= chunk.code.items.len) constant = chunk.code.items[offset + 1];
+
+    var arg_count: isize = -1;
+    if (offset + 1 >= chunk.code.items.len) arg_count = chunk.code.items[offset + 2];
+
+    std.debug.print("{s:<16} ({d}) {d:4} '", .{ getInstructionName(instruction), arg_count, constant });
 
     if (constant >= 0) chunk.constants.items[@intCast(constant)].print();
     std.debug.print("'\n", .{});

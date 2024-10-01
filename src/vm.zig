@@ -365,6 +365,35 @@ pub const VM = struct {
         return true;
     }
 
+    fn invoke(self: *VM, name: *String, arg_count: u8) !bool {
+        const receiver = self.peek(arg_count).*;
+
+        if (receiver != .obj or receiver.obj.type != .INSTANCE) {
+            _ = self.runtimeError("Only instances have methods", .{});
+            return false;
+        }
+
+        const instance = receiver.obj.as(Instance);
+
+        var value: Value = undefined;
+        if (instance.fields.get(name, &value)) {
+            self.stack[self.stack_top - arg_count - 1] = value;
+            return self.callValue(value, arg_count);
+        }
+
+        return try self.invokeFromClass(instance.class, name, arg_count);
+    }
+
+    fn invokeFromClass(self: *VM, class: *Class, name: *String, arg_count: u8) !bool {
+        var method: Value = undefined;
+        if (!class.methods.get(name, &method)) {
+            _ = self.runtimeError("Undefined property '{s}'.", .{name.chars});
+            return false;
+        }
+
+        return self.call(method.obj.as(Closure), arg_count);
+    }
+
     fn run(self: *VM) !InterpretResult {
         var frame = &self.frames[self.frame_count - 1];
         var prev_offset: usize = 0;
@@ -547,6 +576,15 @@ pub const VM = struct {
                 else => {
                     std.debug.print("Unknown opcode {d}\n", .{instruction});
                     return .COMPILE_ERROR;
+                },
+                @intFromEnum(OpCode.INVOKE) => {
+                    const method = frame.readString();
+                    const arg_count = frame.readByte();
+                    if (!try self.invoke(method, arg_count)) {
+                        return .RUNTIME_ERROR;
+                    }
+
+                    frame = &self.frames[self.frame_count - 1];
                 },
             }
         }

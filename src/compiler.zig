@@ -842,6 +842,11 @@ const Parser = struct {
         if (can_assign and self.match(.EQUAL)) {
             try self.expression();
             try self.emitBytes(@intFromEnum(OpCode.SET_PROPERTY), name);
+        } else if (self.match(.LEFT_PAREN)) {
+            // This is for optimising method calls - no need to load variable and stuff
+            const arg_count = try self.argumentList();
+            try self.emitBytes(@intFromEnum(OpCode.INVOKE), name);
+            try self.emitByte(arg_count);
         } else {
             try self.emitBytes(@intFromEnum(OpCode.GET_PROPERTY), name);
         }
