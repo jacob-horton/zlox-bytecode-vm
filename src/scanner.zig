@@ -268,4 +268,6 @@ pub const TokenType = enum {
 
     ERROR,
     EOF,
+
+    SYNTHETIC,
 };

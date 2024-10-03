@@ -102,12 +102,12 @@ pub const Table = struct {
         self.entries = entries;
     }
 
-    fn addAll(self: *Table, from: *Table) void {
+    pub fn addAll(self: *Table, from: *Table) !void {
         if (from.entries) |from_entries| {
             for (from_entries) |entry| {
-                if (entry.key == null) continue;
-
-                self.set(entry.key, entry.value);
+                if (entry.key) |entry_key| {
+                    _ = try self.set(entry_key, entry.value);
+                }
             }
         }
     }

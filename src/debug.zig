@@ -70,6 +70,7 @@ pub fn disassembleInstruction(chunk: *Chunk, offset: usize, prev_offset: usize) 
         @intFromEnum(OpCode.GET_LOCAL) => return byteInstruction(instruction, chunk, offset),
         @intFromEnum(OpCode.SET_PROPERTY) => return constantInstruction(instruction, chunk, offset),
         @intFromEnum(OpCode.GET_PROPERTY) => return constantInstruction(instruction, chunk, offset),
+        @intFromEnum(OpCode.GET_SUPER) => return constantInstruction(instruction, chunk, offset),
         @intFromEnum(OpCode.SET_GLOBAL) => return constantInstruction(instruction, chunk, offset),
         @intFromEnum(OpCode.GET_GLOBAL) => return constantInstruction(instruction, chunk, offset),
         @intFromEnum(OpCode.DEFINE_GLOBAL) => return simpleInstruction(instruction, offset),
@@ -86,6 +87,8 @@ pub fn disassembleInstruction(chunk: *Chunk, offset: usize, prev_offset: usize) 
         @intFromEnum(OpCode.CLASS) => return constantInstruction(instruction, chunk, offset),
         @intFromEnum(OpCode.METHOD) => return constantInstruction(instruction, chunk, offset),
         @intFromEnum(OpCode.INVOKE) => return invokeInstruction(instruction, chunk, offset),
+        @intFromEnum(OpCode.SUPER_INVOKE) => return invokeInstruction(instruction, chunk, offset),
+        @intFromEnum(OpCode.INHERIT) => return simpleInstruction(instruction, offset),
         else => {
             std.debug.print("Unknown opcode {d}\n", .{instruction});
             return offset + 1;

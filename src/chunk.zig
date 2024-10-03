@@ -20,6 +20,7 @@ pub const OpCode = enum(u8) {
     GET_LOCAL,
     SET_PROPERTY,
     GET_PROPERTY,
+    GET_SUPER,
     DEFINE_GLOBAL,
     EQUAL,
     GREATER,
@@ -40,6 +41,8 @@ pub const OpCode = enum(u8) {
     CLASS,
     METHOD,
     INVOKE,
+    SUPER_INVOKE,
+    INHERIT,
 };
 
 const RleItem = struct {

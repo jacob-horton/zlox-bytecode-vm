@@ -586,6 +586,36 @@ pub const VM = struct {
 
                     frame = &self.frames[self.frame_count - 1];
                 },
+                @intFromEnum(OpCode.SUPER_INVOKE) => {
+                    const method = frame.readString();
+                    const arg_count = frame.readByte();
+                    const superclass = self.pop().obj.as(Class);
+                    if (!try self.invokeFromClass(superclass, method, arg_count)) {
+                        return .RUNTIME_ERROR;
+                    }
+
+                    frame = &self.frames[self.frame_count - 1];
+                },
+                @intFromEnum(OpCode.INHERIT) => {
+                    const superclass_val = self.peek(1).*;
+                    if (superclass_val != .obj or superclass_val.obj.type != .CLASS) {
+                        return self.runtimeError("Superclass must be a class.", .{});
+                    }
+
+                    const superclass = superclass_val.obj.as(Class);
+                    const subclass = self.peek(0).obj.as(Class);
+
+                    try subclass.methods.addAll(&superclass.methods);
+                    _ = self.pop(); // Subclass
+                },
+                @intFromEnum(OpCode.GET_SUPER) => {
+                    const name = frame.readString();
+                    const superclass = self.pop().obj.as(Class);
+
+                    if (!try self.bindMethod(superclass, name)) {
+                        return .RUNTIME_ERROR;
+                    }
+                },
             }
         }
     }
