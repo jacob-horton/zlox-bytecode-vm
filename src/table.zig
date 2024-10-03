@@ -50,7 +50,7 @@ pub const Table = struct {
     fn findEntry(entries: ?[]Entry, key: *String) ?*Entry {
         if (entries == null) return null;
 
-        var index = key.hash % entries.?.len;
+        var index = key.hash & (entries.?.len - 1);
 
         while (true) {
             const entry = &entries.?[index];
@@ -69,7 +69,7 @@ pub const Table = struct {
                 return entry;
             }
 
-            index = (index + 1) % entries.?.len;
+            index = (index + 1) & (entries.?.len - 1);
         }
     }
 
@@ -140,7 +140,7 @@ pub const Table = struct {
     pub fn findString(self: *Table, key: [*]const u8, len: usize, hash: u32) ?*String {
         if (self.entries == null) return null;
 
-        var index = hash % self.entries.?.len;
+        var index = hash & (self.entries.?.len - 1);
 
         while (true) {
             const entry = &self.entries.?[index];
@@ -156,7 +156,7 @@ pub const Table = struct {
                 }
             }
 
-            index = (index + 1) % self.entries.?.len;
+            index = (index + 1) & (self.entries.?.len - 1);
         }
     }
 };
