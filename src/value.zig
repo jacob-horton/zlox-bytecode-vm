@@ -24,47 +24,93 @@ pub const Value = union(enum) {
     obj: *Obj,
     nil,
 
+    pub fn initBool(boolean: bool) Value {
+        return Value{ .boolean = boolean };
+    }
+
+    pub fn initNumber(num: f64) Value {
+        return Value{ .number = num };
+    }
+
+    pub fn initObject(obj: *Obj) Value {
+        return Value{ .obj = obj };
+    }
+
+    pub fn initNil() Value {
+        return .nil;
+    }
+
+    pub fn asBool(self: Value) bool {
+        return self.boolean;
+    }
+
+    pub fn asNumber(self: Value) f64 {
+        return self.number;
+    }
+
+    pub fn asObject(self: Value) *Obj {
+        return self.obj;
+    }
+
+    pub fn isBool(self: Value) bool {
+        return self == .boolean;
+    }
+
+    pub fn isNumber(self: Value) bool {
+        return self == .number;
+    }
+
+    pub fn isObj(self: Value) bool {
+        return self == .obj;
+    }
+
+    pub fn isNil(self: Value) bool {
+        return self == .nil;
+    }
+
     pub fn isFalsey(self: Value) bool {
-        return self == .nil or (self == .boolean and !self.boolean);
+        return self.isNil() or (self.isBool() and !self.asBool());
     }
 
     pub fn isObjType(self: Value, typ: ObjType) bool {
-        return self == .obj and self.obj.type == typ;
+        return self.isObj() and self.asObject().type == typ;
     }
 
     pub fn print(self: Value) void {
-        switch (self) {
-            .number => |n| std.debug.print("{d}", .{n}),
-            .boolean => |b| std.debug.print("{s}", .{if (b) "true" else "false"}),
-            .obj => |o| o.print(),
-            .nil => std.debug.print("nil", .{}),
-        }
+        if (self.isNumber()) {
+            std.debug.print("{d}", .{self.asNumber()});
+        } else if (self.isBool()) {
+            std.debug.print("{s}", .{if (self.asBool()) "true" else "false"});
+        } else if (self.isObj()) {
+            self.asObject().print();
+        } else if (self.isNil()) {
+            std.debug.print("nil", .{});
+        } else unreachable;
     }
 
     pub fn equals(a: Value, b: Value) bool {
         if (@as(std.meta.Tag(Value), a) != @as(std.meta.Tag(Value), b)) return false;
 
-        return switch (a) {
-            .boolean => a.boolean == b.boolean,
-            .number => a.number == b.number,
-            // Pointer comparison because strings are interned
-            .obj => a.obj == b.obj,
-            .nil => true,
-        };
+        if (a.isNumber()) {
+            return a.asNumber() == b.asNumber();
+        } else if (a.isBool()) {
+            return a.asBool() == b.asBool();
+        } else if (a.isObj()) {
+            return a.asObject() == b.asObject();
+        } else if (a.isNil()) {
+            return true;
+        } else unreachable;
     }
 
+    // TODO: camel case
     fn check_numeric(a: Value, b: Value) OperationError!void {
-        if (a != .number or b != .number) {
+        if (!a.isNumber() or !b.isNumber()) {
             return OperationError.ExpectBothNumeric;
         }
     }
 
     fn check_string(a: Value, b: Value) OperationError!void {
-        if (a != .obj or
-            b != .obj or
-            a.obj.type != .STRING or
-            b.obj.type != .STRING)
-        {
+        if (!a.isObjType(.STRING) or !b.isObjType(.STRING)) {
             return OperationError.ExpectBothString;
         }
     }
@@ -76,7 +122,7 @@ pub const Value = union(enum) {
         @memcpy(chars[a.chars.len..len], b.chars);
 
         const str = try String.takeInit(vm, chars);
-        return Value{ .obj = &str.obj };
+        return Value.initObject(&str.obj);
     }
 
     pub fn add(vm: *VM, a: Value, b: Value) OperationError!Value {
@@ -85,41 +131,45 @@ pub const Value = union(enum) {
             Value.check_string(a, b) catch return OperationError.ExpectBothStringOrBothNumeric;
         };
 
-        switch (a) {
-            .number => return Value{ .number = a.number + b.number },
-            .obj => return Value.concatenate(
+        if (a.isNumber()) {
+            return Value.initNumber(a.asNumber() + b.asNumber());
+        }
+
+        if (a.isObjType(.STRING)) {
+            return Value.concatenate(
                 vm,
-                a.obj.as(String),
-                b.obj.as(String),
+                a.asObject().as(String),
+                b.asObject().as(String),
             ) catch {
                 return OperationError.ConcatenationError;
-            },
-            else => unreachable,
+            };
         }
+
+        unreachable;
     }
 
     pub fn sub(_: *VM, a: Value, b: Value) OperationError!Value {
         try Value.check_numeric(a, b);
-        return Value{ .number = a.number - b.number };
+        return Value.initNumber(a.asNumber() - b.asNumber());
     }
 
     pub fn mul(_: *VM, a: Value, b: Value) OperationError!Value {
         try Value.check_numeric(a, b);
-        return Value{ .number = a.number * b.number };
+        return Value.initNumber(a.asNumber() * b.asNumber());
     }
 
     pub fn div(_: *VM, a: Value, b: Value) OperationError!Value {
         try Value.check_numeric(a, b);
-        return Value{ .number = a.number / b.number };
+        return Value.initNumber(a.asNumber() / b.asNumber());
     }
 
     pub fn less(_: *VM, a: Value, b: Value) OperationError!Value {
         try Value.check_numeric(a, b);
-        return Value{ .boolean = a.number < b.number };
+        return Value.initBool(a.asNumber() < b.asNumber());
     }
 
     pub fn greater(_: *VM, a: Value, b: Value) OperationError!Value {
         try Value.check_numeric(a, b);
-        return Value{ .boolean = a.number > b.number };
+        return Value.initBool(a.asNumber() > b.asNumber());
     }
 };

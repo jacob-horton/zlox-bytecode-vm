@@ -72,7 +72,7 @@ const CallFrame = struct {
     }
 
     fn readString(self: *CallFrame) *String {
-        return self.readConstant().obj.as(String);
+        return self.readConstant().asObject().as(String);
     }
 };
 
@@ -147,10 +147,10 @@ pub const VM = struct {
         const result = compiler.compile(source) catch null;
 
         if (result) |function| {
-            self.push(Value{ .obj = &function.obj });
+            self.push(Value.initObject(&function.obj));
             const closure = try Closure.init(self, function);
             _ = self.pop();
-            self.push(Value{ .obj = &closure.obj });
+            self.push(Value.initObject(&closure.obj));
 
             _ = self.call(closure, 0);
 
@@ -234,53 +234,50 @@ pub const VM = struct {
 
     fn defineNative(self: *VM, name: []const u8, function: NativeFn) !void {
         const str = try String.copyInit(self, name.ptr, name.len);
-        self.push(Value{ .obj = &str.obj });
+        self.push(Value.initObject(&str.obj));
         const native = try Native.init(self, function);
-        self.push(Value{ .obj = &native.obj });
+        self.push(Value.initObject(&native.obj));
 
-        _ = try self.globals.set(self.stack[0].obj.as(String), self.stack[1]);
+        _ = try self.globals.set(self.stack[0].asObject().as(String), self.stack[1]);
 
         _ = self.pop();
         _ = self.pop();
     }
 
     fn callValue(self: *VM, callee: Value, arg_count: u8) !bool {
-        switch (callee) {
-            .obj => |obj| {
-                switch (obj.type) {
-                    .CLASS => {
-                        const class = obj.as(Class);
-                        const instance = try Instance.init(self, class);
-                        self.stack[self.stack_top - arg_count - 1] = Value{ .obj = &instance.obj };
+        if (callee.isObj()) {
+            switch (callee.asObject().type) {
+                .CLASS => {
+                    const class = callee.asObject().as(Class);
+                    const instance = try Instance.init(self, class);
+                    self.stack[self.stack_top - arg_count - 1] = Value.initObject(&instance.obj);
 
-                        var initialiser: Value = undefined;
-                        if (class.methods.get(self.init_string.?, &initialiser)) {
-                            return self.call(initialiser.obj.as(Closure), arg_count);
-                        } else if (arg_count != 0) {
-                            _ = self.runtimeError("Expected 0 arguments but got {d}", .{arg_count});
-                            return false;
-                        }
+                    var initialiser: Value = undefined;
+                    if (class.methods.get(self.init_string.?, &initialiser)) {
+                        return self.call(initialiser.asObject().as(Closure), arg_count);
+                    } else if (arg_count != 0) {
+                        _ = self.runtimeError("Expected 0 arguments but got {d}", .{arg_count});
+                        return false;
+                    }
 
-                        return true;
-                    },
-                    .CLOSURE => return self.call(obj.as(Closure), arg_count),
-                    .BOUND_METHOD => {
-                        const bound = obj.as(BoundMethod);
-                        self.stack[self.stack_top - arg_count - 1] = bound.receiver;
-                        return self.call(bound.method, arg_count);
-                    },
-                    .NATIVE => {
-                        const native = obj.as(Native);
-                        const result = native.function(arg_count, @as([*]Value, &self.stack) + self.stack_top - arg_count);
-                        self.stack_top -= arg_count + 1;
-                        self.push(result);
+                    return true;
+                },
+                .CLOSURE => return self.call(callee.asObject().as(Closure), arg_count),
+                .BOUND_METHOD => {
+                    const bound = callee.asObject().as(BoundMethod);
+                    self.stack[self.stack_top - arg_count - 1] = bound.receiver;
+                    return self.call(bound.method, arg_count);
+                },
+                .NATIVE => {
+                    const native = callee.asObject().as(Native);
+                    const result = native.function(arg_count, @as([*]Value, &self.stack) + self.stack_top - arg_count);
+                    self.stack_top -= arg_count + 1;
+                    self.push(result);
 
-                        return true;
-                    },
-                    else => {}, // Non-callable object type
-                }
-            },
-            else => {}, // Non-callable value
+                    return true;
+                },
+                else => {}, // Non-callable object type
+            }
         }
 
         _ = self.runtimeError("Can only call functions and classes.", .{});
@@ -345,7 +342,7 @@ pub const VM = struct {
 
     fn defineMethod(self: *VM, name: *String) !void {
         const method = self.peek(0).*;
-        const class = self.peek(1).obj.as(Class);
+        const class = self.peek(1).asObject().as(Class);
         _ = try class.methods.set(name, method);
         _ = self.pop();
     }
@@ -358,22 +355,22 @@ pub const VM = struct {
             return false;
         }
 
-        const bound = try BoundMethod.init(self, self.peek(0).*, method.obj.as(Closure));
+        const bound = try BoundMethod.init(self, self.peek(0).*, method.asObject().as(Closure));
 
         _ = self.pop();
-        self.push(Value{ .obj = &bound.obj });
+        self.push(Value.initObject(&bound.obj));
         return true;
     }
 
     fn invoke(self: *VM, name: *String, arg_count: u8) !bool {
         const receiver = self.peek(arg_count).*;
 
-        if (receiver != .obj or receiver.obj.type != .INSTANCE) {
+        if (!receiver.isObjType(.INSTANCE)) {
             _ = self.runtimeError("Only instances have methods", .{});
             return false;
         }
 
-        const instance = receiver.obj.as(Instance);
+        const instance = receiver.asObject().as(Instance);
 
         var value: Value = undefined;
         if (instance.fields.get(name, &value)) {
@@ -391,7 +388,7 @@ pub const VM = struct {
             return false;
         }
 
-        return self.call(method.obj.as(Closure), arg_count);
+        return self.call(method.asObject().as(Closure), arg_count);
     }
 
     fn run(self: *VM) !InterpretResult {
@@ -421,8 +418,8 @@ pub const VM = struct {
                     self.push(constant);
                 },
                 @intFromEnum(OpCode.NIL) => self.push(.nil),
-                @intFromEnum(OpCode.TRUE) => self.push(Value{ .boolean = true }),
-                @intFromEnum(OpCode.FALSE) => self.push(Value{ .boolean = false }),
+                @intFromEnum(OpCode.TRUE) => self.push(Value.initBool(true)),
+                @intFromEnum(OpCode.FALSE) => self.push(Value.initBool(false)),
                 @intFromEnum(OpCode.POP) => _ = self.pop(),
                 @intFromEnum(OpCode.SET_UPVALUE) => {
                     const slot = frame.readByte();
@@ -463,11 +460,11 @@ pub const VM = struct {
                 },
                 @intFromEnum(OpCode.GET_PROPERTY) => {
                     const instance_val = self.peek(0);
-                    if (instance_val.* != .obj or instance_val.obj.type != .INSTANCE) {
+                    if (!instance_val.isObjType(.INSTANCE)) {
                         return self.runtimeError("Only instances have properties", .{});
                     }
 
-                    const instance = instance_val.obj.as(Instance);
+                    const instance = instance_val.asObject().as(Instance);
                     const name = frame.readString();
 
                     // NOTE: fields always shadow methods
@@ -483,11 +480,11 @@ pub const VM = struct {
                 },
                 @intFromEnum(OpCode.SET_PROPERTY) => {
                     const instance_val = self.peek(1);
-                    if (instance_val.* != .obj or instance_val.obj.type != .INSTANCE) {
+                    if (!instance_val.isObjType(.INSTANCE)) {
                         return self.runtimeError("Only instances have fields", .{});
                     }
 
-                    const instance = instance_val.obj.as(Instance);
+                    const instance = instance_val.asObject().as(Instance);
                     _ = try instance.fields.set(frame.readString(), self.peek(0).*);
 
                     const value = self.pop();
@@ -497,7 +494,7 @@ pub const VM = struct {
                 @intFromEnum(OpCode.EQUAL) => {
                     const b = self.pop();
                     const a = self.pop();
-                    self.push(Value{ .boolean = Value.equals(a, b) });
+                    self.push(Value.initBool(Value.equals(a, b)));
                 },
                 @intFromEnum(OpCode.GREATER) => self.binaryOp(Value.greater) catch |err| return self.runtimeErrorFromErr(err),
                 @intFromEnum(OpCode.LESS) => self.binaryOp(Value.less) catch |err| return self.runtimeErrorFromErr(err),
@@ -505,11 +502,13 @@ pub const VM = struct {
                 @intFromEnum(OpCode.SUBTRACT) => self.binaryOp(Value.sub) catch |err| return self.runtimeErrorFromErr(err),
                 @intFromEnum(OpCode.MULTIPLY) => self.binaryOp(Value.mul) catch |err| return self.runtimeErrorFromErr(err),
                 @intFromEnum(OpCode.DIVIDE) => self.binaryOp(Value.div) catch |err| return self.runtimeErrorFromErr(err),
-                @intFromEnum(OpCode.NOT) => self.push(Value{ .boolean = self.pop().isFalsey() }),
+                @intFromEnum(OpCode.NOT) => self.push(Value.initBool(self.pop().isFalsey())),
                 @intFromEnum(OpCode.NEGATE) => {
-                    switch (self.peek(0).*) {
-                        .number => |*num| num.* = -num.*,
-                        else => return self.runtimeErrorFromErr(RuntimeError.ExpectOperandNumeric),
+                    const val = self.peek(0);
+                    if (val.isNumber()) {
+                        val.* = Value.initNumber(-val.asNumber());
+                    } else {
+                        return self.runtimeErrorFromErr(RuntimeError.ExpectOperandNumeric);
                     }
                 },
                 @intFromEnum(OpCode.PRINT) => {
@@ -536,9 +535,9 @@ pub const VM = struct {
                     frame = &self.frames[self.frame_count - 1];
                 },
                 @intFromEnum(OpCode.CLOSURE) => {
-                    const function = frame.readConstant().obj.as(Function);
+                    const function = frame.readConstant().asObject().as(Function);
                     const closure = try Closure.init(self, function);
-                    self.push(Value{ .obj = &closure.obj });
+                    self.push(Value.initObject(&closure.obj));
 
                     for (0..closure.upvalue_count) |i| {
                         const is_local = frame.readByte() > 0;
@@ -570,7 +569,7 @@ pub const VM = struct {
                 },
                 @intFromEnum(OpCode.CLASS) => {
                     const class = try Class.init(self, frame.readString());
-                    self.push(Value{ .obj = &class.obj });
+                    self.push(Value.initObject(&class.obj));
                 },
                 @intFromEnum(OpCode.METHOD) => try self.defineMethod(frame.readString()),
                 else => {
@@ -589,7 +588,7 @@ pub const VM = struct {
                 @intFromEnum(OpCode.SUPER_INVOKE) => {
                     const method = frame.readString();
                     const arg_count = frame.readByte();
-                    const superclass = self.pop().obj.as(Class);
+                    const superclass = self.pop().asObject().as(Class);
                     if (!try self.invokeFromClass(superclass, method, arg_count)) {
                         return .RUNTIME_ERROR;
                     }
@@ -598,19 +597,19 @@ pub const VM = struct {
                 },
                 @intFromEnum(OpCode.INHERIT) => {
                     const superclass_val = self.peek(1).*;
-                    if (superclass_val != .obj or superclass_val.obj.type != .CLASS) {
+                    if (!superclass_val.isObjType(.CLASS)) {
                         return self.runtimeError("Superclass must be a class.", .{});
                     }
 
-                    const superclass = superclass_val.obj.as(Class);
-                    const subclass = self.peek(0).obj.as(Class);
+                    const superclass = superclass_val.asObject().as(Class);
+                    const subclass = self.peek(0).asObject().as(Class);
 
                     try subclass.methods.addAll(&superclass.methods);
                     _ = self.pop(); // Subclass
                 },
                 @intFromEnum(OpCode.GET_SUPER) => {
                     const name = frame.readString();
-                    const superclass = self.pop().obj.as(Class);
+                    const superclass = self.pop().asObject().as(Class);
 
                     if (!try self.bindMethod(superclass, name)) {
                         return .RUNTIME_ERROR;

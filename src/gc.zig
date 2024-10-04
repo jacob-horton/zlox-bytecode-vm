@@ -201,7 +201,7 @@ pub const GC = struct {
     }
 
     fn markValue(self: *Self, value: Value) !void {
-        if (value == .obj) try self.markObject(value.obj);
+        if (value.isObj()) try self.markObject(value.asObject());
     }
 
     fn markObject(self: *Self, object: *Obj) !void {

@@ -5,6 +5,8 @@ pub const DEBUG_PRINT_CODE = false;
 pub const DEBUG_STRESS_GC = false;
 pub const DEBUG_LOC_GC = false;
 
+pub const NAN_BOXING = true;
+
 pub const U8_COUNT: u9 = std.math.maxInt(u8) + 1;
 
 /// Gets the offset between two pointers, in number of items (rather than number of bytes)

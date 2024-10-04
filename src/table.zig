@@ -36,7 +36,7 @@ pub const Table = struct {
 
         const entry = Table.findEntry(self.entries, key).?;
         const is_new_key = entry.key == null;
-        if (is_new_key and entry.value == .nil) self.count += 1;
+        if (is_new_key and entry.value.isNil()) self.count += 1;
 
         entry.key = key;
         entry.value = value;
@@ -57,7 +57,7 @@ pub const Table = struct {
             var tombstone: ?*Entry = null;
 
             if (entry.key == null) {
-                if (entry.value == .nil) {
+                if (entry.value.isNil()) {
                     // Empty entry
                     return tombstone orelse entry;
                 } else {
@@ -80,7 +80,7 @@ pub const Table = struct {
         // Set default values
         for (entries) |*entry| {
             entry.key = null;
-            entry.value = .nil;
+            entry.value = Value.initNil();
         }
 
         self.count = 0;
@@ -132,7 +132,7 @@ pub const Table = struct {
         }
 
         entry.?.key = null;
-        entry.?.value = Value{ .boolean = true };
+        entry.?.value = Value.initBool(true);
         return true;
     }
 
@@ -150,7 +150,7 @@ pub const Table = struct {
                     return entry.key;
                 }
             } else {
-                if (entry.value == .nil) {
+                if (entry.value.isNil()) {
                     // Stop if we find an empty non-tombstone entry
                     return null;
                 }

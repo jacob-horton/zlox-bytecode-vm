@@ -41,7 +41,7 @@ pub fn disassembleInstruction(chunk: *Chunk, offset: usize, prev_offset: usize) 
             chunk.constants.items[constant].print();
             std.debug.print("\n", .{});
 
-            const function = chunk.constants.items[constant].obj.as(Function);
+            const function = chunk.constants.items[constant].asObject().as(Function);
             for (0..function.upvalue_count) |_| {
                 const is_local = chunk.code.items[new_offset] > 0;
                 new_offset += 1;

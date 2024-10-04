@@ -100,8 +100,8 @@ pub const Obj = struct {
             str.chars = chars;
             str.hash = str_hash;
 
-            vm.push(Value{ .obj = &str.obj });
-            _ = try vm.strings.set(str, .nil);
+            vm.push(Value.initObject(&str.obj));
+            _ = try vm.strings.set(str, Value.initNil());
             _ = vm.pop();
 
             return str;
@@ -260,7 +260,7 @@ pub const Obj = struct {
             const upvalue = (try Obj.init(vm, Upvalue, .UPVALUE)).as(Upvalue);
             upvalue.location = slot;
             upvalue.next = null;
-            upvalue.closed = .nil;
+            upvalue.closed = Value.initNil();
 
             return upvalue;
         }

@@ -352,7 +352,7 @@ const Parser = struct {
         try self.block();
 
         const fun = try self.current_compiler.?.end();
-        try self.emitBytes(@intFromEnum(OpCode.CLOSURE), try self.makeConstant(Value{ .obj = &fun.obj }));
+        try self.emitBytes(@intFromEnum(OpCode.CLOSURE), try self.makeConstant(Value.initObject(&fun.obj)));
 
         for (0..fun.upvalue_count) |i| {
             try self.emitByte(if (compiler.upvalues[i].is_local) 1 else 0);
@@ -415,7 +415,7 @@ const Parser = struct {
 
     fn identifierConstant(self: *Parser, name: *const Token) !u8 {
         const str = try String.copyInit(self.vm, name.start, name.length);
-        return try self.makeConstant(Value{ .obj = &str.obj });
+        return try self.makeConstant(Value.initObject(&str.obj));
     }
 
     fn declareVariable(self: *Parser) void {
@@ -715,12 +715,12 @@ const Parser = struct {
     fn number(self: *Parser, _: bool) !void {
         const token = self.previous;
         const value = try std.fmt.parseFloat(f64, token.start[0..token.length]);
-        try self.emitConstant(Value{ .number = value });
+        try self.emitConstant(Value.initNumber(value));
     }
 
     fn string(self: *Parser, _: bool) !void {
         const str = try String.copyInit(self.vm, self.previous.start + 1, self.previous.length - 2);
-        try self.emitConstant(Value{ .obj = &str.obj });
+        try self.emitConstant(Value.initObject(&str.obj));
     }
 
     fn variable(self: *Parser, can_assign: bool) !void {
