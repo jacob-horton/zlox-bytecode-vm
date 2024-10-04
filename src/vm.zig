@@ -417,7 +417,7 @@ pub const VM = struct {
                     const constant = frame.readConstant();
                     self.push(constant);
                 },
-                @intFromEnum(OpCode.NIL) => self.push(.nil),
+                @intFromEnum(OpCode.NIL) => self.push(Value.initNil()),
                 @intFromEnum(OpCode.TRUE) => self.push(Value.initBool(true)),
                 @intFromEnum(OpCode.FALSE) => self.push(Value.initBool(false)),
                 @intFromEnum(OpCode.POP) => _ = self.pop(),

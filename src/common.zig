@@ -5,7 +5,8 @@ pub const DEBUG_PRINT_CODE = false;
 pub const DEBUG_STRESS_GC = false;
 pub const DEBUG_LOC_GC = false;
 
-pub const NAN_BOXING = true;
+// NOTE: NaN boxing was slower on my system when I did a quick test
+pub const NAN_BOXING = false;
 
 pub const U8_COUNT: u9 = std.math.maxInt(u8) + 1;
 
